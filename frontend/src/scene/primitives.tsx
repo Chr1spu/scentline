@@ -1,6 +1,6 @@
 import { useMemo, useRef, type ReactNode } from 'react';
 import * as THREE from 'three';
-import { Html } from '@react-three/drei';
+import { Html, Line } from '@react-three/drei';
 import { useFrame } from '@react-three/fiber';
 import type { AreaBundle } from '../api/types';
 import { VERT_EXAG } from '../config/constants';
@@ -41,6 +41,26 @@ export function DrapedLine({ bundle, pts, color, opacity = 0.9, lift = 3, dashed
     return l;
   }, [bundle, pts, color, opacity, lift, dashed]);
   return <primitive object={line} />;
+}
+
+/**
+ * A draped line with a real pixel width and a dark casing under a bright core (as printed maps
+ * draw boundaries), so it reads over forest, rock and the heatmap alike.
+ */
+export function CasedLine({ bundle, pts, color, width = 2.5, casing = 2.5, lift = 4, opacity = 1 }: { bundle: AreaBundle; pts: [number, number][]; color: string; width?: number; casing?: number; lift?: number; opacity?: number }) {
+  const points = useMemo(() => {
+    const a = drapedPath(bundle, pts, lift);
+    const v: [number, number, number][] = [];
+    for (let i = 0; i < a.length; i += 3) v.push([a[i], a[i + 1], a[i + 2]]);
+    return v;
+  }, [bundle, pts, lift]);
+  if (points.length < 2) return null;
+  return (
+    <group>
+      <Line points={points} color="#0d110f" lineWidth={width + 2 * casing} transparent opacity={0.85 * opacity} depthTest={false} renderOrder={8} />
+      <Line points={points} color={color} lineWidth={width} transparent opacity={opacity} depthTest={false} renderOrder={9} />
+    </group>
+  );
 }
 
 /** Vertical light beam + pulsing ground ring. */

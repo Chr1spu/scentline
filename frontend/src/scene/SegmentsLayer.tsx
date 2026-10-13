@@ -3,7 +3,7 @@ import type { AreaBundle } from '../api/types';
 import { COLORS } from '../config/constants';
 import { toScene } from '../geo/heights';
 import { useStore } from '../state/store';
-import { DrapedLine, Label } from './primitives';
+import { CasedLine, Label } from './primitives';
 
 /** Densify a ring every ~20 m so it hugs the terrain. */
 function densify(ring: [number, number][]): [number, number][] {
@@ -33,8 +33,12 @@ export function SegmentsLayer({ bundle }: { bundle: AreaBundle }) {
       {outlines.map((pts, k) => {
         const team = assigned.get(k);
         if (pts.length < 3) return null;
-        const color = team ? COLORS.team[(team - 1) % COLORS.team.length] : '#d8dde3';
-        return <DrapedLine key={k} bundle={bundle} pts={pts} color={color} lift={team ? 5 : 3} opacity={team ? 0.95 : 0.35} />;
+        // unassigned: a light outline on a dark casing; assigned: thicker, in the team's colour
+        return team ? (
+          <CasedLine key={k} bundle={bundle} pts={pts} color={COLORS.team[(team - 1) % COLORS.team.length]} width={4} casing={2.5} lift={6} />
+        ) : (
+          <CasedLine key={k} bundle={bundle} pts={pts} color="#f4f0e6" width={2} casing={1.5} lift={4} opacity={0.9} />
+        );
       })}
       {seg.centroid.map(([x, y], k) => {
         const team = assigned.get(k);

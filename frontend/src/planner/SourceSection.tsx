@@ -2,7 +2,7 @@ import type { ReactNode } from 'react';
 import { HABITAT_CLASSES, MISSIONS } from '../config/missions';
 import { PROFILES } from '../config/modelParams';
 import { shareBeyond } from '../models/probability';
-import { clearHides, finishPolygon, fmtTime, scoreTrialGpx, setHabitat, setProfile, setTerrainClass, setTravelDir } from '../state/controller';
+import { bestFocus, clearHides, computeDetailAt, finishPolygon, fmtTime, scoreTrialGpx, setHabitat, setProfile, setTerrainClass, setTravelDir } from '../state/controller';
 import { TERRAIN_LABELS, type TerrainClass } from '../config/modelParams';
 import { distanceModelFor } from '../models/lpbDistance';
 import { DETECTION } from '../config/modelParams';
@@ -98,6 +98,7 @@ export function SourceSection() {
             {mode === 'live' ? ' (Focus square, below)' : ''}.
           </p>
         )}
+        {mission.source === 'lkp' && <FocusSuggestion />}
         {outside >= 0.05 && mission.source === 'lkp' && (
           <p className="mt-1.5 text-xs leading-snug text-ink-3">
             About <span className="num">{Math.round(outside * 100)}%</span> of where a {PROFILES[profile].label.toLowerCase()} typically ends up lies beyond the{' '}
@@ -320,6 +321,34 @@ function TerrainPicker() {
           <span className="num">{table.q[3]}</span> km: 25%, 50%, 75%, 95% (Lost Person Behavior, {used ? TERRAIN_LABELS[used].toLowerCase() : ''}, {table.n} cases
           {table.n < 20 ? '; few cases, treat with care' : ''}).
         </p>
+      )}
+    </div>
+  );
+}
+
+/**
+ * When another 3 km square would hold clearly more of the probability than the current focus
+ * square, say so; in live mode, offer to move it there (recomputes terrain and wind for it).
+ */
+function FocusSuggestion() {
+  const prob = useStore((s) => s.prob);
+  const mode = useStore((s) => s.mode);
+  const busy = useStore((s) => !!s.busy);
+  if (!prob) return null;
+  const best = bestFocus();
+  if (!best || best.share < prob.segmentFraction + 0.05) return null;
+  const dist = Math.hypot(best.x, best.y);
+  return (
+    <div className="mt-1.5 rounded-sm border border-rule bg-card px-2 py-1.5 text-xs leading-snug text-ink-2">
+      A 3 km square centred <span className="num">{(dist / 1000).toFixed(1)} km</span> from here would hold{' '}
+      <span className="num font-semibold text-ink">{Math.round(best.share * 100)}%</span> of the probability (this one holds{' '}
+      <span className="num">{Math.round(prob.segmentFraction * 100)}%</span>).
+      {mode === 'live' ? (
+        <button className="btn btn-sm mt-1 w-full justify-center" disabled={busy} onClick={() => computeDetailAt(best.x, best.y)}>
+          Move the focus square there
+        </button>
+      ) : (
+        ' Open the area live to move it.'
       )}
     </div>
   );

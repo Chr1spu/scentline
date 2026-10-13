@@ -390,9 +390,51 @@ export function segmentAt(seg: Segmentation, map: GridMap, x: number, y: number)
  * 1 − e^(−coverage), coverage = SEGMENTS.coverageRef × scent conditions (scent present relative
  * to neutral, clamped).
  */
-export function sweepDetection(relStrength: number): number {
+export function sweepDetection(relStrength: number, effortShare = 1): number {
   const cond = Math.min(SEGMENTS.maxCond, Math.max(SEGMENTS.minCond, relStrength));
-  return 1 - Math.exp(-SEGMENTS.coverageRef * cond);
+  return 1 - Math.exp(-SEGMENTS.coverageRef * cond * Math.max(0, effortShare));
+}
+
+/**
+ * Hours one team needs for each segment. Pace is slowed by slope with Tobler's hiking function,
+ * using the gradient averaged over travel directions (2/π of the slope: a team searching an area
+ * crosses slopes as much as it climbs them), and taken relative to the area's typical ground: the
+ * NASAR pace is for "an area consistent with that which would be expected" for the team, so the
+ * area's average segment takes area / SEGMENTS.teamRateM2PerH and steeper segments take longer.
+ */
+export function segmentHours(seg: Segmentation, slopeDeg: Float32Array, cellM: number): Float64Array {
+  const h = new Float64Array(seg.n);
+  const slow = (i: number) => Math.exp(SEGMENTS.toblerK * (2 / Math.PI) * Math.tan((Math.min(slopeDeg[i], 60) * Math.PI) / 180));
+  let sum = 0;
+  let cnt = 0;
+  for (let i = 0; i < seg.id.length; i++) {
+    if (seg.id[i] < 0) continue;
+    sum += slow(i);
+    cnt++;
+  }
+  const ref = cnt ? sum / cnt : 1;
+  const a = (cellM * cellM) / SEGMENTS.teamRateM2PerH;
+  for (let i = 0; i < seg.id.length; i++) {
+    const k = seg.id[i];
+    if (k >= 0) h[k] += (a * slow(i)) / ref;
+  }
+  return h;
+}
+
+/** Scent present relative to neutral within each segment (heat vs reference heat); fallback where none. */
+export function segmentConditions(seg: Segmentation, heat: Float32Array, refHeat: Float32Array, fallback: number): Float32Array {
+  const a = new Float64Array(seg.n);
+  const b = new Float64Array(seg.n);
+  for (let i = 0; i < seg.id.length; i++) {
+    const k = seg.id[i];
+    if (k < 0) continue;
+    a[k] += heat[i];
+    b[k] += refHeat[i];
+  }
+  let refTotal = 0;
+  for (let k = 0; k < seg.n; k++) refTotal += b[k];
+  // too little scent in a segment to judge: use the area-wide value
+  return Float32Array.from(a, (v, k) => (b[k] > refTotal * 1e-3 ? v / b[k] : fallback));
 }
 
 export interface SegmentScore {
@@ -439,8 +481,13 @@ export interface ScoreInput {
   q: Float32Array;
   deployable: Uint8Array;
   windAt: WindAt;
-  /** detection for people inside a segment the team searches (sweepDetection), default reference conditions */
-  insideDet?: number;
+  /**
+   * scent conditions per segment (scent present relative to neutral, 1 = neutral) or one value for
+   * all; default 1
+   */
+  conditions?: number | Float32Array;
+  /** hours one team needs for each segment (segmentHours); default area / pace on flat ground */
+  hours?: Float64Array;
   /** chance the team acts on a detection, default HOTSPOTS.dogPOD */
   pod?: number;
 }
@@ -453,7 +500,6 @@ export interface ScoreInput {
 export function scoreSegments(inp: ScoreInput): SegmentScore[] {
   const { seg, map, blocks: b, det, q } = inp;
   const pod = inp.pod ?? HOTSPOTS.dogPOD;
-  const inside = inp.insideDet ?? sweepDetection(1);
   const cols = map.cols;
   // receiver blocks and source blocks by the segment holding their centre cell
   const centreSeg = (blockCol: number, blockRow: number, size: number) => {
@@ -474,8 +520,12 @@ export function scoreSegments(inp: ScoreInput): SegmentScore[] {
       if (val[s] === 0) touched.push(s);
       if (d > val[s]) val[s] = d;
     };
-    // people outside: scent that drifts into the segment; people inside: search-theory coverage
-    // (scent at zero range always "detects", so it would say nothing about conditions)
+    // people inside: search-theory coverage for this segment's scent conditions and the share of it
+    // one assignment can cover; people outside: scent that drifts into the segment (scent at zero
+    // range always "detects", so it would say nothing about conditions)
+    const hours = inp.hours ? inp.hours[k] : seg.areaM2[k] / SEGMENTS.teamRateM2PerH;
+    const cond = typeof inp.conditions === 'number' ? inp.conditions : inp.conditions ? inp.conditions[k] : 1;
+    const inside = sweepDetection(cond, Math.min(1, SEGMENTS.assignmentH / Math.max(hours, 1e-6)));
     for (const r of recvOfSeg[k]) for (let j = det.start[r]; j < det.start[r + 1]; j++) if (srcSeg[det.src[j]] !== k) bump(det.src[j], det.det[j]);
     for (let s = 0; s < b.nSrc; s++) if (srcSeg[s] === k && q[s] > 0) bump(s, inside);
     let poa = 0;
@@ -519,7 +569,7 @@ export function scoreSegments(inp: ScoreInput): SegmentScore[] {
       entry: entryPoint(seg, k, map, inp.deployable, dir),
       upwind: [-dir[0], -dir[1]],
       windSpeed: sp / wn,
-      hours: seg.areaM2[k] / SEGMENTS.teamRateM2PerH,
+      hours,
       cover: { src, d },
       insideCover: { src: Int32Array.from(ins), d: new Float32Array(ins.length).fill(inside) },
     });

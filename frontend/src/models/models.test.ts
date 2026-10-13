@@ -443,3 +443,20 @@ describe('parallel ensemble slices', () => {
     expect(cs).toBeCloseTo(cf, 5);
   });
 });
+
+describe('fanning-plume clue', () => {
+  it('needs two stable-air alerts at nearly the same elevation', async () => {
+    const { fanningClue } = await import('./triangulation');
+    expect(fanningClue([{ z: 500, stable: true }])).toBeNull();
+    expect(fanningClue([{ z: 500, stable: true }, { z: 520, stable: true }])).toBeCloseTo(510, 6);
+    expect(fanningClue([{ z: 500, stable: true }, { z: 600, stable: true }])).toBeNull();
+    expect(fanningClue([{ z: 500, stable: false }, { z: 505, stable: true }])).toBeNull(); // daytime alert doesn't count
+  });
+  it('weights toward the elevation, never to zero', async () => {
+    const { elevationBand } = await import('./triangulation');
+    const b = elevationBand(Float32Array.from([500, 540, 700]), 500);
+    expect(b[0]).toBeCloseTo(1, 6);
+    expect(b[1]).toBeLessThan(b[0]);
+    expect(b[2]).toBeGreaterThan(0.3);
+  });
+});

@@ -127,6 +127,9 @@ All tunable numbers are in `frontend/src/config/modelParams.ts` and `backend/app
 * **Field trials** (`models/validation.ts`, `docs/FIELD_TRIALS.md`): in Training mode, import a dog's GPX track with alert waypoints; the planner scores whether alerts fell where the model predicted detection (AUC) and saves a trial record for pooling.
 * **Offline in the field:** a service worker (`public/sw.js`) keeps the app usable without signal once opened online, and every live area is saved on the device (`api/savedAreas.ts`, IndexedDB); opening the same planner link with no server falls back to the saved copy.
 
+* **Shifts, focus, clues:** End shift logs a shift's segments as searched with no alert and plans the next around what is left; the planner suggests a better focus square when one holds clearly more probability; two night alerts at the same elevation weight probability toward that elevation (fanning plumes).
+* **Wind check** (`backend/scripts/validate_wind.py`, `analyse_wind.py`): runs the backend's WindNinja and fallback at RAWS weather stations (Synoptic Data; needs `SYNOPTIC_TOKEN` in `.env`) and compares directions hour by hour; results in `docs/EVALUATION.md`.
+
 ### Evaluation
 
 `docs/EVALUATION.md` covers the physics checks (plume widths against Briggs/Pasquill), a simulated comparison of plans against simpler strategies under wind-direction error, a parameter sensitivity study, and the known limits. Run it with `cd frontend && npx vite-node scripts/evaluate.ts`. Headline: assigning whole segments is far more robust to wind error than points and routes; using scent to choose and time segments adds about 4–8 points over choosing the most likely segments unless the wind is badly wrong, and the planner rates its wind confidence and hedges when it is low.

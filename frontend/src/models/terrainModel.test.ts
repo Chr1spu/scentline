@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { PROFILES, TERRAIN } from '../config/modelParams';
 import { cellAt, cellCenterLocal, frameOf, gridMap, type GridMeta } from '../geo/grid';
-import { barrierFactor, buildStaticLayers, computeProbability, dispersionWeight, percentRank, terrainFactor, type Feature2D } from './probability';
+import { barrierFactor, bestWindow, buildStaticLayers, computeProbability, dispersionWeight, percentRank, terrainFactor, type Feature2D } from './probability';
 import { LC } from './terrainInfo';
 
 const n = 100;
@@ -57,5 +57,19 @@ describe('direction of travel (ISRID dispersion)', () => {
     }
     expect(within / total).toBeGreaterThan(0.7);
     expect(within / total).toBeLessThan(0.8);
+  });
+});
+
+describe('focus square placement', () => {
+  it('finds the window holding the most probability', () => {
+    const p = new Float32Array(100 * 100);
+    for (let r = 60; r < 80; r++) for (let c = 10; c < 30; c++) p[r * 100 + c] = 1;
+    p[5 * 100 + 95] = 50; // a single strong cell elsewhere, less than the block's 400
+    const w = bestWindow(p, 100, 100, 30);
+    expect(w.share).toBeCloseTo(400 / 450, 6);
+    expect(w.row).toBeGreaterThanOrEqual(65);
+    expect(w.row).toBeLessThanOrEqual(75);
+    expect(w.col).toBeGreaterThanOrEqual(15);
+    expect(w.col).toBeLessThanOrEqual(25);
   });
 });

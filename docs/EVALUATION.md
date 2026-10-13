@@ -103,7 +103,54 @@ The truth worlds in section 3 use the corrected detection, so the earlier route-
 | Close-range detectability 0.3 / 0.9 | 0 / 0 m | 31.3 / 31.3% |
 | Team spacing 150 / 500 m | 18 / 173 m | 31.5 / 31.3% |
 
-## 4. Where the person might be (probability map)
+## 4. The wind model against weather stations (`backend/scripts/validate_wind.py`)
+
+**Setup:**
+- 9 RAWS fire-weather stations (federal network, 6 m masts, mostly in rough terrain), from mountain areas in Colorado, Montana, North Carolina, California and New York, via Synoptic Data. A Washington area returned no usable data.
+- The last five days, 13:00–21:00 local. Synoptic's free tier only serves the past ~6 days.
+- For each station, a planner area centred on it. The backend ran WindNinja (domain-average initialisation from Open-Meteo's forecast-model wind, diurnal on) and the slope-wind fallback.
+- The model is sampled at the station (mean of 3×3 cells) and compared with the observation nearest each hour.
+- 355 station-hours, 243 with at least 1 m/s of observed wind, the cases where a direction means something.
+
+| Direction source | Median error | Within 30° | Over 45° |
+| --- | --- | --- | --- |
+| **WindNinja** | **17°** | **72%** | 18% |
+| Slope-wind fallback | 18° | 67% | 21% |
+| Raw input wind (no terrain) | 20° | 67% | 21% |
+
+**The planner's wind confidence rating against the real errors:**
+
+| Rating | Station-hours | Median error | Within 30° | Over 45° |
+| --- | --- | --- | --- | --- |
+| Reliable | 192 | 14° | 78% | 14% |
+| Uncertain | 23 | 22° | 70% | 17% |
+| Unreliable | 28 | 39° | 36% | 46% |
+
+**By the evidence for each threshold:**
+- **Modelled wind speed:** below 1 m/s the median error was 63° (n = 15); 1–2 m/s gave 31°; 2–3 m/s gave 22°; above 3 m/s, 14°.
+- **WindNinja vs fallback disagreement:** at 45° or more, every case was over 45° off (n = 4).
+- **Turning wind:** with 60° or more of turn within an hour either side, the median error was 36°.
+
+The thresholds, set by reasoning before this test, separate good and bad forecasts as intended, so they are unchanged. WindNinja's terrain adjustment helps, though modestly here: 72% within 30° against 67% for the raw input. The gain was largest in the California Sierra (60% vs 53%).
+
+**What it means for the plan.** The segment strategies were scored (section 3) under the errors actually seen, mapping each observed error to the nearest simulated error angle:
+
+| Rating | Segments chosen with scent | Most likely segments (no scent) | Routes, app rule |
+| --- | --- | --- | --- |
+| Reliable | 51.8% | 45.8% | 25.3% |
+| Uncertain | 50.4% | 44.8% | 20.9% |
+| Unreliable | 44.2% | 41.6% | 14.2% |
+| All | **50.8%** | 45.2% | 23.6% |
+
+Under real wind errors, choosing segments with scent beats choosing by probability alone in every confidence class: by 6 points when the wind is rated reliable, 2.6 when unreliable.
+
+**Caveats:**
+- It's a small sample: 9 stations, 5 days, afternoon and evening only, early October. It says nothing about nights or other seasons.
+- The stations measure at 6 m and the model at 2 m.
+- The input wind is forecast-model output for the day, as live use would have, but WindNinja ran with domain-average initialisation, not the HRRR initialisation used for live areas.
+- The run repeats in about 15 minutes. Re-running it every week or so grows the sample, since only the last six days are available each time.
+
+## 5. Where the person might be (probability map)
 
 **Distances, now sourced.** Log-normals fitted to published quartiles; spread = ln(Q75/Q25) / 1.349.
 
@@ -136,22 +183,21 @@ These replace the earlier invented "trail pull". They apply within each profile'
 
 **Coverage gaps.** The 3 km focus square holds 69–72% of the probability in the demo. The planner warns when it holds under half, and gives each profile's share beyond the modelled area.
 
-## 5. Limitations: what this can't show
+## 6. Limitations: what this can't show
 
 - **Circularity:** the true worlds use the same physics as the planner, with the wind changed. This tests robustness to wind error, not whether the physics is right. Only field data can, which is what the trial tool is for.
 - **Dog range and acting on a detection** (d50 = 200 m, 0.7) are assumptions, and the absolute success figures scale with them.
 - **Inside a segment, POD is search theory** calibrated to NASAR's 50% average, scaled with scent conditions. Vegetation and terrain don't change it yet, and responsive and unresponsive subjects aren't separated. Ground scent and trailing dogs aren't modelled.
 - **Drift credit:** a no-alert search lowers upwind ground at half weight. That's a judgement made to avoid clearing ground on the strength of a wrong wind.
 - **Block resolution:** detection is at 50 m receiver blocks with 100 m source blocks, so a source means "someone in this 100 m square". The peak-concentration correction assumes the dog crosses the plume within the block.
-- **Wind confidence thresholds** (1 and 2 m/s, 25/45° model disagreement, 30/60° turning) are reasoned, not fitted. WindNinja hasn't been compared with weather stations here.
+- **Wind confidence thresholds** are now checked against 243 station-hours (section 4) and separate good from bad forecasts, but the sample is small: 9 stations, 5 days, afternoons and evenings only.
 - **Distance data:** the child figures cover all ages under 13 together, and the dementia figures are for flat terrain. ISRID has finer tables (by age band and terrain) in *Lost Person Behavior* (Koester 2008), which should replace these when available.
 - **Injured vs uninjured:** the terrain multipliers are for uninjured subjects. Injured people are found even more often near trails (×7) and streams (×3.5).
 
-## 6. Next steps, in order of value
+## 7. Next steps, in order of value
 
 1. **Field trials with a K9 unit** ([FIELD_TRIALS.md](FIELD_TRIALS.md)): 20–30 training runs scored with the planner's GPX import. They test the physics and set the dog's range.
-2. **Wind validation:** compare WindNinja and the fallback against RAWS / MesoWest stations near past incidents, and fit the confidence thresholds to the real direction errors.
+2. **Grow the wind check:** re-run `validate_wind.py` weekly (the free tier keeps six days), add night hours, and compare HRRR-initialised runs for live dates.
 3. **Finer ISRID tables:** age bands, terrain types and the injured/uninjured split, from *Lost Person Behavior*.
 4. **Expert review** of the hedge rule and defaults by K9 handlers and an incident planner.
-5. **Segment effort allocation over time:** several operational periods, cumulative POD and when to re-search a segment (rather than one assignment at a time).
-6. **Alert-pattern clues:** looping-plume alert lines and night alerts at one elevation (fanning plumes) as extra evidence in the back-trace.
+5. **Vegetation in segment POD and pace:** dense brush and forest slow teams and shorten scent travel; needs field-trial data.

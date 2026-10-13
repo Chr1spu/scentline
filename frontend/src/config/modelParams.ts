@@ -379,9 +379,30 @@ export const SEGMENTS = {
   coverageRef: 1.25,
   minCond: 0.15,
   maxCond: 1.5,
+  /**
+   * Length of one dog-team assignment (h). A segment that needs longer is only partly covered:
+   * coverage scales by assignmentH / hours. NASAR tests run 1.5 h (40–60 acres) to 4 h (140–160).
+   */
+  assignmentH: 3,
+  /**
+   * Walking pace on slopes: Tobler's hiking function, v ∝ e^(−3.5 |tan θ|) relative to flat
+   * (Tobler 1993), applied cell by cell to the team pace.
+   */
+  toblerK: 3.5,
 };
 
 export const TRIANGULATION = {
+  /**
+   * Fanning plumes: on stable nights scent holds at its elevation, and "a series of night-time
+   * alerts at the same elevation is an important clue: check elsewhere at that elevation"
+   * (Graham, 77 Facts about Search Dogs, #29). When at least two alerts in stable air (Pasquill
+   * E/F) lie within fanMatchM of each other in elevation, probability is weighted toward that
+   * elevation: × (fanFloor + (1 − fanFloor)·e^(−½(Δz/fanBandM)²)). A gentle heuristic.
+   */
+  fanMatchM: 30,
+  fanBandM: 40,
+  fanFloor: 0.35,
+  fanMinClass: 4,
   particles: 3000,
   backMinutes: 60,
   dt: 5,

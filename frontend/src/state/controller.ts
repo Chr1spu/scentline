@@ -6,13 +6,13 @@ import { backendHealthy, loadLive, loadOffline, type LiveRequest } from '../api/
 import { findSaved, loadSavedArea, saveArea } from '../api/savedAreas';
 import type { AreaBundle } from '../api/types';
 import { DEMO_ALERT_TIMES, VERT_EXAG } from '../config/constants';
-import { ENSEMBLE, HOTSPOTS, PROFILES, TIME, type ProfileId, type TerrainClass } from '../config/modelParams';
+import { ENSEMBLE, HOTSPOTS, PROFILES, SEGMENTS, TIME, type ProfileId, type TerrainClass } from '../config/modelParams';
 import type { SearchedSector as SectorShape } from '../models/searchUpdate';
 import { MISSIONS, type HabitatSpec, type MissionId } from '../config/missions';
-import { cellAt, toLocal, toWorld } from '../geo/grid';
+import { cellAt, cellCenterLocal, gridMap, toLocal, toWorld } from '../geo/grid';
 import { groundY } from '../geo/heights';
 import { sunAt, weatherAt } from '../models/env';
-import { travelLimitBinds } from '../models/probability';
+import { bestWindow, travelLimitBinds } from '../models/probability';
 import { alertWaypoints, localHour, parseGpx, scoreTrial, thinTrack, type GpxPoint, type TrackPoint } from '../models/validation';
 import { latLonToUtm, zoneFromCrs } from '../geo/utm';
 import { samplePoints, windConfidence, type WindConfidence } from '../models/windConfidence';
@@ -165,6 +165,7 @@ async function applyBundle(b: AreaBundle) {
     alerts: [],
     searched: [],
     trial: null,
+    shift: 1,
     revealed: false,
     heat: null,
     prob: null,
@@ -573,12 +574,52 @@ export async function addAlert(lx: number, ly: number) {
       get().toast('Found: the child is inside the overlap of the two traced zones.', 'success');
       flyTo(7);
     }, 900);
+  } else if (r.fanElevation !== undefined) {
+    get().toast(`Alert ${alerts.length}: night alerts at the same elevation (~${Math.round(r.fanElevation)} m). On stable nights scent holds at its level: probability now leans to that contour.`, 'info');
   } else {
     get().toast(`Alert ${alerts.length} logged at ${fmtTime(t)}. Scent traced back one hour.`, 'info');
   }
 }
 
 let searchId = 1;
+
+/**
+ * End a shift with no finds: every assigned segment is logged as searched with no alert over the
+ * time its team worked (its hours, up to one assignment), the time bar moves to the end of the
+ * shift, and the plan is cleared so the next Deploy plans the next shift around what is left.
+ */
+export async function endShift() {
+  const { deployments, time, bundle, segments } = get();
+  const segDeps = deployments.filter((d) => d.segment);
+  if (!bundle || !segments || segDeps.length === 0) return;
+  const longest = Math.max(...segDeps.map((d) => Math.min(d.segment!.hours, SEGMENTS.assignmentH)));
+  const end = Math.min(bundle.config.endHour, time + longest);
+  if (end - time < 0.25) {
+    get().toast('Not enough modelled time left for this shift: the time bar is at the end of the window.', 'warn');
+    return;
+  }
+  set({ time: end });
+  for (const d of segDeps) {
+    const ring = segments.rings[d.segment!.index]?.[0];
+    if (!ring) continue;
+    await markSearched({ kind: 'polygon', xs: ring.map((p) => p[0]), ys: ring.map((p) => p[1]) }, Math.min(d.segment!.hours, SEGMENTS.assignmentH, end - time));
+  }
+  set({ deployments: [], shift: get().shift + 1 });
+  scheduleHeat();
+  await refreshSegments();
+  get().toast(`Shift logged: ${segDeps.length} segment${segDeps.length > 1 ? 's' : ''} searched with no alert. Plan shift ${get().shift} at ${fmtTime(end)}.`, 'info');
+}
+
+/** The most likely focus-square position for the current probability (overview grid). */
+export function bestFocus(): { x: number; y: number; share: number } | null {
+  const { bundle, prob } = get();
+  if (!bundle || !prob) return null;
+  const om = bundle.overview.meta;
+  const win = Math.round((bundle.detail.meta.cols * bundle.detail.meta.cellSize) / om.cellSize);
+  const w = bestWindow(prob.overview, om.cols, om.rows, win);
+  const [x, y] = cellCenterLocal(gridMap(om, bundle.frame), w.row * om.cols + w.col);
+  return { x, y, share: w.share };
+}
 
 /** Score every search segment for a dog team at the time bar's time. */
 export async function refreshSegments() {
@@ -683,7 +724,7 @@ export function finishPolygon(): Promise<void> | void {
 
 export async function resetSearch() {
   const p = await withBusy('Reset', () => worker().call<ProbResult>({ type: 'resetSearch' }));
-  set({ alerts: [], searched: [], revealed: false, deployments: [], segments: null });
+  set({ alerts: [], searched: [], revealed: false, deployments: [], segments: null, shift: 1 });
   if (p) applyProb(p);
   refreshSuggestions();
 }

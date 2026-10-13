@@ -506,3 +506,28 @@ export function shareBeyond(profile: ProfileParams, halfWidthM: number, terrain:
   const r = (2 * halfWidthM) / Math.sqrt(Math.PI);
   return 1 - distanceModelFor(profile, terrain).model.cdf(r);
 }
+
+/**
+ * The square window of `win` cells holding the most probability (prefix sums): where to put the
+ * focus square. Returns its centre cell (row, col) and the share it holds.
+ */
+export function bestWindow(p: Float32Array, cols: number, rows: number, win: number): { row: number; col: number; share: number } {
+  const w = Math.min(win, cols, rows);
+  const S = new Float64Array((cols + 1) * (rows + 1));
+  for (let r = 0; r < rows; r++) {
+    let acc = 0;
+    for (let c = 0; c < cols; c++) {
+      acc += p[r * cols + c];
+      S[(r + 1) * (cols + 1) + c + 1] = S[r * (cols + 1) + c + 1] + acc;
+    }
+  }
+  let best = { row: Math.floor(rows / 2), col: Math.floor(cols / 2), share: -1 };
+  for (let r = 0; r + w <= rows; r++)
+    for (let c = 0; c + w <= cols; c++) {
+      const v = S[(r + w) * (cols + 1) + c + w] - S[r * (cols + 1) + c + w] - S[(r + w) * (cols + 1) + c] + S[r * (cols + 1) + c];
+      if (v > best.share) best = { row: r + Math.floor(w / 2), col: c + Math.floor(w / 2), share: v };
+    }
+  let total = 0;
+  for (let i = 0; i < p.length; i++) total += p[i];
+  return { ...best, share: total > 0 ? best.share / total : 0 };
+}

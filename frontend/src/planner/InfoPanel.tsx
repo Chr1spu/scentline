@@ -3,7 +3,7 @@ import { COLORS, LANDCOVER_CLASSES } from '../config/constants';
 import { DETECTION, HOTSPOTS, SEGMENTS } from '../config/modelParams';
 import { Link } from '../router';
 import { FEATURE_COLORS } from '../scene/FeatureLines';
-import { fmtTime, markSegmentSearched, refreshSegments } from '../state/controller';
+import { endShift, fmtTime, markSegmentSearched, refreshSegments } from '../state/controller';
 import { cellAt, gridMap } from '../geo/grid';
 import { sectorCentroid, sectorContains } from '../models/searchUpdate';
 import { useStore } from '../state/store';
@@ -138,6 +138,7 @@ function Plan() {
     <div className="space-y-2">
       <Briefing />
       <ExportButtons />
+      {deployments.some((d) => d.segment) && <EndShift />}
       <p className="text-xs text-ink-3">Planned for {fmtTime(time)}. Bars: scent score for each hour {deployments[0]?.segment ? 'across the segment' : 'at that point'}.</p>
       {deployments.some((d) => d.kind === 'ground') && (
         <p className="rounded-sm border-l-2 border-amber bg-amber/10 px-2 py-1 text-xs leading-snug text-ink-2">
@@ -403,6 +404,22 @@ export function InfoPanel() {
         {tab === 'legend' && <Legend />}
         {tab === 'notes' && <Notes />}
       </div>
+    </div>
+  );
+}
+
+/** End the shift with no finds: log the segments searched and plan the next shift around what is left. */
+function EndShift() {
+  const shift = useStore((s) => s.shift);
+  const busy = useStore((s) => !!s.busy);
+  return (
+    <div className="flex items-center gap-2 rounded-sm border border-rule bg-card px-2 py-1.5 text-xs text-ink-2">
+      <span className="flex-1 leading-snug">
+        Shift {shift}. If the teams come back with no alert, log it here and plan the next shift around what is left.
+      </span>
+      <button className="btn btn-sm whitespace-nowrap" disabled={busy} onClick={endShift}>
+        End shift: no finds
+      </button>
     </div>
   );
 }

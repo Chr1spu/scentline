@@ -221,7 +221,9 @@ export function Method() {
             <strong>Wind confidence.</strong> The planner rates the forecast direction around the last known point: unreliable when the wind is under {WIND_CONFIDENCE.poorSpeed} m/s,
             when WindNinja and the simple slope model differ by {WIND_CONFIDENCE.poorDisagreeDeg}° or more, or when the wind turns {WIND_CONFIDENCE.poorTurnDeg}° or more within an hour
             either side (the evening switch to downslope flow); uncertain from {WIND_CONFIDENCE.fairSpeed} m/s, {WIND_CONFIDENCE.fairDisagreeDeg}° and {WIND_CONFIDENCE.fairTurnDeg}°.
-            Simulated tests show scent-based placement loses its edge once the real wind is 20–30° off the forecast, so this rating decides how the plan hedges.
+            Simulated tests show scent-based placement loses its edge once the real wind is 20–30° off the forecast, so this rating decides how the plan hedges. Checked against
+            243 hourly observations from 9 RAWS fire-weather stations in mountain terrain: when it said reliable, the modelled direction was within 30° of the station 78% of the time
+            (median error 14°); when it said unreliable, only 36% (median 39°).
           </p>
           <Figure src={img('step-scent.jpg')} alt="Scent heatmap at 7 PM draining down the valley" caption="7 PM in the demo: cooling air drains scent down the notch toward the south-west." />
 
@@ -257,18 +259,24 @@ export function Method() {
               <strong>POA</strong>, the share of the probability inside it;
             </li>
             <li>
-              <strong>POD</strong> for a person in it: 1 − e<sup>−coverage</sup>, the search-theory form, with coverage scaled by how much scent is about compared with neutral conditions.
-              It averages {pct(HOTSPOTS.dogPOD * (1 - Math.exp(-SEGMENTS.coverageRef)))} in neutral conditions, the working average NASAR uses for a dog team;
+              <strong>POD</strong> for a person in it: 1 − e<sup>−coverage</sup>, the search-theory form. Coverage is scaled by how much scent survives in that segment compared with
+              neutral conditions (shaded drainages keep it, sunny slopes lose it), and by how much of the segment one {SEGMENTS.assignmentH}-hour assignment can cover. It averages{' '}
+              {pct(HOTSPOTS.dogPOD * (1 - Math.exp(-SEGMENTS.coverageRef)))} in neutral conditions, the working average NASAR uses for a dog team;
             </li>
             <li>
               <strong>Finds</strong>, what one team would find: POA × POD, plus people outside whose scent drifts in (single-person detection, as above);
             </li>
-            <li>the entry point on its downwind edge, the heading into the wind, the hours one team needs and its best hour.</li>
+            <li>
+              the entry point on its downwind edge, the heading into the wind and its best hour, and the hours one team needs: steeper ground than the area typically has is slower
+              (Tobler&apos;s hiking function, with the gradient averaged over travel directions).
+            </li>
           </ul>
           <p>
             Teams are given the segments that add the most finds, each discounting what the earlier teams cover. The segment table in the Plan tab lists every segment this way, with
             the cumulative POD from searches already logged, and flags a segment searched in the last {SEGMENTS.clearAirMin} minutes: a dog needs the air clear of other searchers
-            first.
+            first. <strong>End shift</strong> logs the assigned segments as searched with no alert over the time each team worked, moves the time bar on, and the next Deploy plans
+            the next shift around what is left. When another 3 km square would hold clearly more of the probability than the focus square, the planner says so and, live, offers to
+            move it there.
           </p>
           <p>
             <strong>Start points</strong> (the other option, for hasty searches) work as follows.
@@ -306,7 +314,9 @@ export function Method() {
           <p>
             <strong>Alert.</strong> Where a dog alerts, {TRIANGULATION.particles.toLocaleString()} particles are traced backwards through the wind for {TRIANGULATION.backMinutes} minutes: the
             scent must have come from somewhere along that path. Each alert multiplies the probability by (ε + zone) with ε = {TRIANGULATION.eps}. Two alerts from different wind directions
-            cross where the person is.
+            cross where the person is; a line of brief alerts along one plume (looping plumes on clear middays) traces back along the same line and concentrates at its upwind end.
+            On stable nights scent holds at its own elevation (fanning plumes), and a series of night alerts at the same elevation is a recognised clue: when two alerts in stable air
+            are within {TRIANGULATION.fanMatchM} m of each other in elevation, probability is weighted gently toward that elevation.
           </p>
           <TriangulationDiagram />
           <p className="!mt-4">

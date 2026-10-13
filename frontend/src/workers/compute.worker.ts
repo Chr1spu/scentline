@@ -5,7 +5,7 @@
  */
 import { AUTO_MOUNTAIN_RELIEF_M, ENSEMBLE, HOTSPOTS, PROBABILITY, PROFILES, TRIANGULATION, type TerrainClass } from '../config/modelParams';
 import { distanceModelFor } from '../models/lpbDistance';
-import { envAt } from '../models/env';
+import { envAt, stabilityClass } from '../models/env';
 import { MISSIONS, type MissionId } from '../config/missions';
 import { aggregateToOverview, areaPrior, habitatPrior, hidesPrior, waterPrior } from '../models/sources';
 import { setTuning } from '../models/tuning';
@@ -30,10 +30,10 @@ import { normalizeContrib, blockIndex, meanderFor, type BlockIndex } from '../mo
 import { EnsemblePool, parallelEnsemble, poolSize } from './pool';
 import { searchUpdate, type SearchedSector } from '../models/searchUpdate';
 import { buildTerrainInfo, LC, type TerrainInfo } from '../models/terrainInfo';
-import { alertLikelihood, argmax, backtrace, driftPoint } from '../models/triangulation';
+import { alertLikelihood, argmax, backtrace, driftPoint, elevationBand, fanningClue, type AlertRecord } from '../models/triangulation';
 import { sampleWind, type WindField } from '../models/wind';
 import type { AlertResult, DeploymentOut, Envelope, HeatResult, InitMsg, ProbResult, Reply, SearchResult, SegmentInfo, SegmentsResult, SourceSpec } from './protocol';
-import { assignSegments, receiversOfSegments, scoreSegments, segmentArea, segmentBoundary, sweepDetection, type Segmentation } from '../models/segments';
+import { assignSegments, receiversOfSegments, scoreSegments, segmentArea, segmentBoundary, segmentConditions, segmentHours, sweepDetection, type Segmentation } from '../models/segments';
 
 const ctx = self as unknown as DedicatedWorkerGlobalScope;
 
@@ -68,6 +68,9 @@ interface State {
   seg: Segmentation | null;
   /** product of negative-update (searched, no alert) factors per detail cell */
   Lneg: Float32Array;
+  /** alerts so far (elevation, stable air) and the elevations already used as fanning clues */
+  alertLog: AlertRecord[];
+  fanUsed: number[];
   /** intended direction of travel (degrees from north) or null */
   travelDir: number | null;
   /** Lost Person Behavior terrain table: chosen, or 'auto' (by relief) */
@@ -93,6 +96,8 @@ interface Ensemble {
   th: DetThresholds;
   /** scent present relative to the neutral reference */
   relStrength: number;
+  /** the neutral-conditions reference heat (detail level) */
+  refHeat: Float32Array;
   thRecv: DetThresholds;
 }
 
@@ -133,6 +138,8 @@ function init(m: InitMsg) {
     rotDeg: ENSEMBLE.rotDeg,
     seg: null,
     Lneg: new Float32Array(nD).fill(1),
+    alertLog: [],
+    fanUsed: [],
     travelDir: null,
     terrainClass: 'auto',
     prior: null,
@@ -278,6 +285,8 @@ function setMission(mission: MissionId, source: SourceSpec): ProbResult {
   s.deployable = deployableCells(s.ti, s.detailWater, s.cliff, { maxSlopeDeg: t.maxSlopeDeg, mode: t.deploy });
   s.L.fill(1);
   s.Lneg.fill(1);
+  s.alertLog = [];
+  s.fanUsed = [];
   s.outside = 1;
   s.source = source;
   s.prior = null;
@@ -321,6 +330,7 @@ async function ensembleAt(t: number, report: (f: number, l: string) => void, win
     heatRecv: blockMean(heat, cols, rows, s.blocks),
     th: detThresholds(ref.heat),
     relStrength: sumOf(heat) / Math.max(sumOf(ref.heat), 1e-12),
+    refHeat: ref.heat,
     thRecv: detThresholds(blockMean(ref.heat, cols, rows, s.blocks)),
   };
   return s.last;
@@ -413,7 +423,8 @@ async function scoreAt(t: number, report: (f: number, l: string) => void) {
     deployable: s.deployable,
     windAt: (x, y) => sampleWind(s.wind, s.ti.map, x, y, t),
     pod: MISSIONS[s.mission].tuning.pod,
-    insideDet: sweepDetection(e.relStrength),
+    conditions: segmentConditions(seg, e.heat, e.refHeat, e.relStrength),
+    hours: segmentHours(seg, s.ti.slopeDeg, s.ti.meta.cellSize),
   });
   const snaps = await hourlySnapshots(report);
   const recv = receiversOfSegments(seg, s.ti.map, s.blocks);
@@ -594,6 +605,18 @@ function alert(x: number, y: number, t: number, report: (f: number, l: string) =
   const zone = backtrace({ ti: s.ti, field: s.wind, t, x, y, sigmaA, seed: Math.round(x * 7 + y * 13 + t * 100) });
   const L = alertLikelihood(zone);
   for (let i = 0; i < L.length; i++) s.L[i] *= L[i];
+  // fanning plumes: night alerts at one elevation point to that elevation
+  const c = cellAt(s.ti.map, x, y);
+  const stable = stabilityClass(envAt(s.init.place, s.init.weather, t)) >= TRIANGULATION.fanMinClass;
+  s.alertLog.push({ z: c >= 0 ? s.ti.elev[c] : 0, stable });
+  let fanElevation: number | undefined;
+  const fz = fanningClue(s.alertLog);
+  if (fz !== null && !s.fanUsed.some((u) => Math.abs(u - fz) <= TRIANGULATION.fanMatchM)) {
+    const band = elevationBand(s.ti.elev, fz);
+    for (let i = 0; i < band.length; i++) s.L[i] *= band[i];
+    s.fanUsed.push(fz);
+    fanElevation = fz;
+  }
   s.outside *= alertLikelihood(new Float32Array(1))[0];
   // keep the likelihood well-scaled
   let mx = 0;
@@ -603,7 +626,7 @@ function alert(x: number, y: number, t: number, report: (f: number, l: string) =
     s.outside /= mx;
   }
   report(0.9, 'Updating probability');
-  return { zone, prob: recomputePosterior() };
+  return { zone, prob: recomputePosterior(), fanElevation };
 }
 
 async function searched(sector: SearchedSector, t0: number, t1: number, report: (f: number, l: string) => void): Promise<SearchResult> {
@@ -746,6 +769,8 @@ async function handle({ id, req }: Envelope): Promise<void> {
         const s = st();
         s.L.fill(1);
         s.Lneg.fill(1);
+        s.alertLog = [];
+        s.fanUsed = [];
         s.outside = 1;
         s.edits.fill(1);
         recomputePrior();

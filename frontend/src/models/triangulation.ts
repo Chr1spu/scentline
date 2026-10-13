@@ -155,3 +155,30 @@ export function driftPoint(ti: TerrainInfo, field: WindField, x: number, y: numb
   }
   return { x, y };
 }
+
+/** Weight toward an elevation (fanning-plume clue): floor + (1 − floor)·e^(−½((z − z0)/band)²). */
+export function elevationBand(elev: Float32Array, z0: number, bandM = TRIANGULATION.fanBandM, floor = TRIANGULATION.fanFloor): Float32Array {
+  const out = new Float32Array(elev.length);
+  for (let i = 0; i < elev.length; i++) {
+    const d = (elev[i] - z0) / bandM;
+    out[i] = floor + (1 - floor) * Math.exp(-0.5 * d * d);
+  }
+  return out;
+}
+
+export interface AlertRecord {
+  z: number;
+  stable: boolean;
+}
+
+/**
+ * The newest alert completes a fanning-plume clue when it and at least one earlier alert were in
+ * stable air at nearly the same elevation; returns their mean elevation, or null.
+ */
+export function fanningClue(alerts: AlertRecord[], matchM = TRIANGULATION.fanMatchM): number | null {
+  const last = alerts[alerts.length - 1];
+  if (!last || !last.stable) return null;
+  const group = alerts.filter((a) => a.stable && Math.abs(a.z - last.z) <= matchM);
+  if (group.length < 2) return null;
+  return group.reduce((s, a) => s + a.z, 0) / group.length;
+}

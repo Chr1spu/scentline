@@ -136,6 +136,8 @@ export interface State {
   deployments: DeploymentOut[];
   alerts: Alert[];
   searched: SearchedSector[];
+  /** operational period being planned (End shift moves to the next) */
+  shift: number;
   /** how teams are assigned: whole search segments (default) or start points with routes */
   assignMode: 'segments' | 'points';
   /** segments scored for a dog team (with the time and data versions they were scored for) */
@@ -213,6 +215,7 @@ export const useStore = create<State>((set, get) => ({
   deployments: [],
   alerts: [],
   searched: [],
+  shift: 1,
   assignMode: 'segments',
   segments: null,
   revealed: false,

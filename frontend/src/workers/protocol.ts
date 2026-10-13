@@ -101,6 +101,8 @@ export interface DeploymentOut {
 export interface AlertResult {
   zone: Float32Array;
   prob: ProbResult;
+  /** a fanning-plume clue this alert completed: the elevation (m) probability was weighted toward */
+  fanElevation?: number;
 }
 
 export interface SearchResult {

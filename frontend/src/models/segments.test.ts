@@ -3,7 +3,8 @@ import { HOTSPOTS } from '../config/modelParams';
 import { cellAt, frameOf, gridMap, type GridMeta } from '../geo/grid';
 import type { ReceiverDetection } from './detection';
 import { blockIndex } from './scent';
-import { assignSegments, nameSegments, ringArea, scoreSegments, segmentArea, segmentAt, sweepDetection } from './segments';
+import { assignSegments, nameSegments, ringArea, scoreSegments, segmentArea, segmentAt, segmentConditions, segmentHours, sweepDetection } from './segments';
+import { SEGMENTS } from '../config/modelParams';
 
 const n = 100;
 const meta: GridMeta = { crs: 'EPSG:32618', originX: 500000, originY: 4600000, cellSize: 10, cols: n, rows: n, noData: -9999 };
@@ -116,5 +117,55 @@ describe('segment scoring and assignment', () => {
     const a = assignSegments(scores, q, 3);
     expect(a.length).toBe(1);
     expect(a[0].score.seg).toBe(homeSeg);
+  });
+});
+
+describe('terrain-aware segments', () => {
+  const seg = segmentArea({ map, boundary: none, excluded: none, targetM2: 100_000 });
+  it('takes longer on ground steeper than the area typically is (Tobler)', () => {
+    const flat = segmentHours(seg, new Float32Array(n * n), 10);
+    const uniform = segmentHours(seg, new Float32Array(n * n).fill(30), 10);
+    for (let k = 0; k < seg.n; k++) {
+      expect(flat[k]).toBeCloseTo(seg.areaM2[k] / SEGMENTS.teamRateM2PerH, 6);
+      expect(uniform[k]).toBeCloseTo(flat[k], 6); // all equally steep: the team's usual pace
+    }
+    const slope = new Float32Array(n * n);
+    for (let i = 0; i < n * n; i++) slope[i] = i % n < n / 2 ? 30 : 0; // west half steep
+    const mixed = segmentHours(seg, slope, 10);
+    const west = seg.centroid.findIndex(([x]) => x < -200);
+    const east = seg.centroid.findIndex(([x]) => x > 200);
+    expect(mixed[west] / seg.areaM2[west]).toBeGreaterThan((2 * mixed[east]) / seg.areaM2[east]);
+    let total = 0;
+    let areaSum = 0;
+    for (let k = 0; k < seg.n; k++) {
+      total += mixed[k];
+      areaSum += seg.areaM2[k];
+    }
+    expect(total).toBeCloseTo(areaSum / SEGMENTS.teamRateM2PerH, 3); // the area as a whole at the usual pace
+  });
+  it('reads scent conditions per segment, falling back where there is no scent', () => {
+    const heat = new Float32Array(n * n);
+    const ref = new Float32Array(n * n);
+    for (let i = 0; i < n * n; i++) {
+      ref[i] = 1;
+      heat[i] = seg.id[i] === 0 ? 0.3 : 1; // segment 0 loses most of its scent
+    }
+    ref.fill(0, 0, 0);
+    const c = segmentConditions(seg, heat, ref, 0.8);
+    expect(c[0]).toBeCloseTo(0.3, 5);
+    expect(c[1]).toBeCloseTo(1, 5);
+    const none2 = segmentConditions(seg, new Float32Array(n * n), new Float32Array(n * n), 0.8);
+    expect(none2[0]).toBeCloseTo(0.8, 5);
+  });
+  it('lowers POD for poor scent and for a segment too big for one assignment', () => {
+    const blocks = blockIndex(n, n, HOTSPOTS.recvBlockCells, HOTSPOTS.srcBlockCells);
+    const q = new Float32Array(blocks.nSrc).fill(1 / blocks.nSrc);
+    const base = { seg, map, blocks, det: noDet(blocks.nRecv), q, deployable: new Uint8Array(n * n).fill(1), windAt: () => ({ u: 1, v: 0 }) };
+    const good = scoreSegments(base)[0].podInside;
+    const poor = scoreSegments({ ...base, conditions: 0.3 })[0].podInside;
+    const long = scoreSegments({ ...base, hours: Float64Array.from(seg.areaM2, () => 2 * SEGMENTS.assignmentH) })[0].podInside;
+    expect(poor).toBeLessThan(good);
+    expect(long).toBeLessThan(good);
+    expect(long).toBeCloseTo(HOTSPOTS.dogPOD * sweepDetection(1, 0.5), 5);
   });
 });

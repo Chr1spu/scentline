@@ -26,6 +26,18 @@ export interface Segmentation {
   centroid: [number, number][];
   /** outline rings per segment (local metres), simplified */
   rings: [number, number][][][];
+  /**
+   * Every border once: the line between segment `left` and segment `right` (−1 = outside the
+   * segmented area), with `left` on the left of the direction of travel. Shared borders are drawn
+   * from these so neighbours meet on one line; junction points are kept exactly.
+   */
+  borders: SegmentBorder[];
+}
+
+export interface SegmentBorder {
+  left: number;
+  right: number;
+  pts: [number, number][];
 }
 
 export interface SegmentInput {
@@ -248,7 +260,8 @@ export function segmentArea(inp: SegmentInput): Segmentation {
   const centroid: [number, number][] = Array.from({ length: n }, (_, k) => [sx[k] / (areaM2[k] / (cell * cell)), sy[k] / (areaM2[k] / (cell * cell))]);
   const names = nameSegments(centroid, Math.sqrt(target));
   const rings = traceOutlines(id, n, map).map((rs) => rs.map((ring) => simplify(ring, cell * SEGMENTS.simplifyCells)));
-  return { id, n, names, areaM2, centroid, rings };
+  const borders = traceBorders(id, map).map((b) => ({ ...b, pts: simplifyOpen(b.pts, cell * SEGMENTS.simplifyCells) }));
+  return { id, n, names, areaM2, centroid, rings, borders };
 }
 
 /** Rows of segments north to south get letters, west to east within a row get numbers: A1, A2, B1… */
@@ -327,6 +340,112 @@ export function traceOutlines(id: Int32Array, n: number, map: GridMap): [number,
     // largest ring first (the outer boundary)
     return rings.sort((a, b) => Math.abs(ringArea(b)) - Math.abs(ringArea(a)));
   });
+}
+
+/**
+ * Each border between two regions (or a region and excluded ground such as water) traced once along cell edges and
+ * chained into polylines, oriented with the lower id (or −1, outside) on the left. Chains end at
+ * junctions where three or more regions meet, so neighbouring borders share their end points.
+ */
+export function traceBorders(id: Int32Array, map: GridMap): SegmentBorder[] {
+  const { cols, rows } = map;
+  const W = cols + 1;
+  // −2 beyond the grid edge (the focus-square frame already marks it, so those borders are skipped)
+  const at = (r: number, c: number) => (r < 0 || c < 0 || r >= rows || c >= cols ? -2 : id[r * cols + c]);
+  // directed edges per (left, right) pair: from vertex -> to vertex
+  const groups = new Map<string, { left: number; right: number; out: Map<number, number[]>; indeg: Map<number, number> }>();
+  const add = (left: number, right: number, from: number, to: number) => {
+    const key = `${left},${right}`;
+    let g = groups.get(key);
+    if (!g) {
+      g = { left, right, out: new Map(), indeg: new Map() };
+      groups.set(key, g);
+    }
+    const l = g.out.get(from);
+    if (l) l.push(to);
+    else g.out.set(from, [to]);
+    g.indeg.set(to, (g.indeg.get(to) ?? 0) + 1);
+  };
+  for (let r = 0; r <= rows; r++)
+    for (let c = 0; c <= cols; c++) {
+      // horizontal edge between (r−1, c) above and (r, c) below, vertices (r, c) – (r, c+1)
+      if (c < cols) {
+        const up = at(r - 1, c);
+        const down = at(r, c);
+        if (up !== down) {
+          // moving east (local +x) the left side is north (up)
+          if (up < down) add(up, down, r * W + c, r * W + c + 1);
+          else add(down, up, r * W + c + 1, r * W + c);
+        }
+      }
+      // vertical edge between (r, c−1) west and (r, c) east, vertices (r, c) – (r+1, c)
+      if (r < rows) {
+        const west = at(r, c - 1);
+        const east = at(r, c);
+        if (west !== east) {
+          // moving south (local −y) the left side is east
+          if (east < west) add(east, west, r * W + c, (r + 1) * W + c);
+          else add(west, east, (r + 1) * W + c, r * W + c);
+        }
+      }
+    }
+  const toLocal = (v: number): [number, number] => {
+    const vr = Math.floor(v / W);
+    const vc = v - vr * W;
+    return [(vc - 0.5 - map.ox) / map.inv, -(vr - 0.5 - map.oy) / map.inv];
+  };
+  const out: SegmentBorder[] = [];
+  for (const g of groups.values()) {
+    if (g.left === -2 || (g.left === -1 && g.right === -1)) continue;
+    const walk = (start: number) => {
+      const pts: [number, number][] = [toLocal(start)];
+      let v = start;
+      for (let guard = 0; guard < 1e6; guard++) {
+        const outs = g.out.get(v);
+        if (!outs || outs.length === 0) break;
+        const next = outs.pop()!;
+        if (outs.length === 0) g.out.delete(v);
+        v = next;
+        pts.push(toLocal(v));
+        if (v === start) break;
+      }
+      if (pts.length > 1) out.push({ left: g.left, right: g.right, pts });
+    };
+    // open chains start where nothing leads in; what remains are closed loops
+    for (const v of [...g.out.keys()]) if (!g.indeg.has(v)) while (g.out.has(v)) walk(v);
+    while (g.out.size > 0) walk(g.out.keys().next().value as number);
+  }
+  return out;
+}
+
+/** Douglas–Peucker for an open polyline (both ends kept, so junctions stay shared). */
+export function simplifyOpen(pts: [number, number][], tol: number): [number, number][] {
+  if (pts.length < 3) return pts;
+  const closed = pts[0][0] === pts[pts.length - 1][0] && pts[0][1] === pts[pts.length - 1][1];
+  if (closed) return simplify(pts, tol);
+  const keep = new Uint8Array(pts.length);
+  keep[0] = keep[pts.length - 1] = 1;
+  const stack: [number, number][] = [[0, pts.length - 1]];
+  while (stack.length) {
+    const [a, b] = stack.pop()!;
+    let idx = -1;
+    let dmax = tol;
+    const [x1, y1] = pts[a];
+    const [x2, y2] = pts[b];
+    const len = Math.hypot(x2 - x1, y2 - y1) || 1;
+    for (let i = a + 1; i < b; i++) {
+      const d = Math.abs((x2 - x1) * (y1 - pts[i][1]) - (x1 - pts[i][0]) * (y2 - y1)) / len;
+      if (d > dmax) {
+        dmax = d;
+        idx = i;
+      }
+    }
+    if (idx >= 0) {
+      keep[idx] = 1;
+      stack.push([a, idx], [idx, b]);
+    }
+  }
+  return pts.filter((_, i) => keep[i]);
 }
 
 export function ringArea(r: [number, number][]): number {

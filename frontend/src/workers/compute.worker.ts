@@ -480,7 +480,7 @@ async function segmentsAt(t: number, report: (f: number, l: string) => void): Pr
       windowScores: ws,
     };
   });
-  return { t, id: seg.id.slice(), names: seg.names, rings: seg.rings, centroid: seg.centroid, segs };
+  return { t, id: seg.id.slice(), names: seg.names, rings: seg.rings, borders: seg.borders, centroid: seg.centroid, segs };
 }
 
 /** Assign teams to whole segments (the handler picks the pattern inside). */

@@ -76,6 +76,8 @@ export interface SegmentsResult {
   id: Int32Array;
   names: string[];
   rings: [number, number][][][];
+  /** every border once (left/right segment, −1 = outside), for drawing */
+  borders: { left: number; right: number; pts: [number, number][] }[];
   centroid: [number, number][];
   segs: SegmentInfo[];
 }

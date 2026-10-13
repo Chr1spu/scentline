@@ -3,7 +3,7 @@ import { HOTSPOTS } from '../config/modelParams';
 import { cellAt, frameOf, gridMap, type GridMeta } from '../geo/grid';
 import type { ReceiverDetection } from './detection';
 import { blockIndex } from './scent';
-import { assignSegments, nameSegments, ringArea, scoreSegments, segmentArea, segmentAt, segmentConditions, segmentHours, sweepDetection } from './segments';
+import { assignSegments, nameSegments, traceBorders, ringArea, scoreSegments, segmentArea, segmentAt, segmentConditions, segmentHours, sweepDetection } from './segments';
 import { SEGMENTS } from '../config/modelParams';
 
 const n = 100;
@@ -167,5 +167,33 @@ describe('terrain-aware segments', () => {
     expect(poor).toBeLessThan(good);
     expect(long).toBeLessThan(good);
     expect(long).toBeCloseTo(HOTSPOTS.dogPOD * sweepDetection(1, 0.5), 5);
+  });
+});
+
+describe('segment borders', () => {
+  it('traces each shared border once, with the lower id on its left', () => {
+    const m = gridMap({ ...meta, cols: 10, rows: 10 }, frameOf({ ...meta, cols: 10, rows: 10 }));
+    const id = new Int32Array(100);
+    for (let i = 0; i < 100; i++) id[i] = i % 10 < 5 ? 0 : 1; // west half 0, east half 1
+    const b = traceBorders(id, m);
+    const shared = b.filter((x) => x.left === 0 && x.right === 1);
+    expect(shared.length).toBe(1);
+    const pts = shared[0].pts;
+    expect(pts.length).toBe(11); // the full height, one vertex per cell edge
+    // moving north (y increasing) region 0 (west) is on the left
+    expect(pts[pts.length - 1][1]).toBeGreaterThan(pts[0][1]);
+    for (const [x] of pts) expect(x).toBeCloseTo(pts[0][0], 6);
+    // nothing along the grid's outer edge (the focus-square frame marks it)
+    expect(b.length).toBe(1);
+    // but a lake inside the area does get a shoreline border
+    id[55] = -1;
+    expect(traceBorders(id, m).some((x) => x.left === -1 && x.right === 1)).toBe(true);
+  });
+  it('real segmentations: every neighbouring pair shares exactly one border line set, no duplicates', () => {
+    const seg = segmentArea({ map, boundary: none, excluded: none, targetM2: 100_000 });
+    const keys = seg.borders.map((x) => `${x.left},${x.right}`);
+    for (const x of seg.borders) expect(x.left).toBeLessThan(x.right === -1 ? Infinity : x.right + 1e-9);
+    // no border appears in both orientations
+    for (const x of seg.borders) expect(keys).not.toContain(`${x.right},${x.left}`);
   });
 });

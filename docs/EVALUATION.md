@@ -88,6 +88,18 @@ The truth worlds in section 3 use the corrected detection, so the earlier route-
 - **The app rule** (±35° spread and one hedge team when the wind isn't reliable) picked the same segments as all-by-scent here, D2, E3 and D3; the hedge team's choice, D3, is also a scent pick.
 - **The scores scale with assumptions that aren't measured yet:** the 50% average segment POD in neutral conditions (NASAR's working figure), d50 = 200 m and 0.7 for acting on a detection. Read the table for comparisons between plans.
 
+**Tried and rejected: segment edges that keep the likely core in one segment.** A variant cut segments with the probability map as a weight: one segment centred on the most likely spot, growth 2.5× cheaper through likely ground, and features in the core cheaper to cross. It did what it was meant to: for a child 1–3, the share of probability lying on an edge fell from 8.6% to 3.1%, and the most likely segment rose from 31% to 80% of the probability, with segment sizes unchanged. But plans got worse (8 worlds, success weighted by the station wind-error distribution: 30% at 0°, 35% at 15°, 20% at 30°, 10% at 45°, 5% at 90°):
+
+| Subject | Terrain edges (app rule) | Core kept together (app rule) |
+| --- | --- | --- |
+| Child 1–3 | 71.5% | 62.5% |
+| Child 7–9 | 47.9% | 46.0% |
+| Dementia | 68.7% | 57.8% |
+| Adult, activity unknown | 48.4% | 44.6% |
+| Hiker | 40.2% | 38.1% |
+
+With the core in one segment, only one team can work it; when edges cross the core, two or three teams share it and search effort concentrates where the probability is densest, as search theory says it should. Making core segments smaller instead (growth slower through likely ground) also scored lower. Edges stay terrain-only. Rerun with `npx vite-node scripts/evaluate.ts --profile=<id> --no-write`.
+
 **Planning ensemble width** (route plans): ±20° gives a mean of 18.0%, ±35° 19.0%, ±50° 18.3%. With a wind that isn't reliable the planner uses ±35°.
 
 **Sensitivity** (route plan, 15° error, ±20°, base 31.3%): changing any single assumption moves starts by at most about 170 m and success by at most 1 point.

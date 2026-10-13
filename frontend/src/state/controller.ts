@@ -338,6 +338,8 @@ export async function setHabitat(habitat: HabitatSpec) {
 export async function setProfile(profile: ProfileId) {
   set({ profile, deployments: [] });
   await recomputeProbability();
+  // each segment's share of the probability changed
+  if (get().segments) await refreshSegments();
   get().toast(`Profile: ${PROFILES[profile].label}`);
 }
 
@@ -345,12 +347,16 @@ export async function setProfile(profile: ProfileId) {
 export async function setTerrainClass(terrainClass: TerrainClass | 'auto') {
   set({ terrainClass, deployments: [] });
   await recomputeProbability();
+  // each segment's share of the probability changed
+  if (get().segments) await refreshSegments();
 }
 
 /** Intended direction of travel (degrees from north) or null; reweights the map by ISRID dispersion. */
 export async function setTravelDir(deg: number | null) {
   set({ travelDir: deg, deployments: [] });
   await recomputeProbability();
+  // each segment's share of the probability changed
+  if (get().segments) await refreshSegments();
 }
 
 /**
@@ -404,6 +410,8 @@ function cellAtLocal(x: number, y: number): number {
 export async function setLkp(lx: number, ly: number) {
   set({ lkp: [lx, ly], deployments: [], tool: 'none' });
   await recomputeProbability();
+  // each segment's share of the probability changed
+  if (get().segments) await refreshSegments();
 }
 
 export async function brush(lx: number, ly: number, up: boolean) {

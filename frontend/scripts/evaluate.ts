@@ -70,7 +70,7 @@ const blocks = blockIndex(b.detail.meta.cols, b.detail.meta.rows, HOTSPOTS.recvB
 const cols = b.detail.meta.cols;
 const rows = b.detail.meta.rows;
 
-const ovProb = computeProbability({ meta: b.overview.meta, map: ovMap, layers: ovLayers, barrier: barrierFactor(ovLayers, b.overview.meta, ovMap, lkp), lkp, profile: PROFILES[c.profile as keyof typeof PROFILES] });
+const ovProb = computeProbability({ meta: b.overview.meta, map: ovMap, layers: ovLayers, barrier: barrierFactor(ovLayers, b.overview.meta, ovMap, lkp), lkp, profile: PROFILES[(process.argv.find((x) => x.startsWith('--profile='))?.split('=')[1] ?? c.profile) as keyof typeof PROFILES] });
 const { prob, segmentFraction } = resampleToDetail(ovProb, ovMap, ti.map, water);
 const q = sourceSums(prob, blocks);
 log(`demo loaded: ${cols}x${rows} detail grid, focus square holds ${(segmentFraction * 100).toFixed(0)}% of the probability`);
@@ -394,5 +394,5 @@ for (const v of variants) {
 }
 
 const out = { date: new Date().toISOString(), quick: QUICK, worlds: WORLDS, segmentFraction, deployHour: T, teams: TEAMS, detection: { d50M: DETECTION.d50M, routeM: HOTSPOTS.routeM }, windConfidence: conf, trials: table, ensembleSpread: spread, sensitivity: { baseScore, variants: sens } };
-writeFileSync(join(__dirname, 'evaluation-results.json'), JSON.stringify(out, null, 1));
+if (!process.argv.includes('--no-write')) writeFileSync(join(__dirname, 'evaluation-results.json'), JSON.stringify(out, null, 1));
 log('wrote scripts/evaluation-results.json');

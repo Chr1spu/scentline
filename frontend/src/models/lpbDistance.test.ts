@@ -37,3 +37,31 @@ describe('distance distributions from published quantiles', () => {
     expect(m.quantile(0.95)).toBeCloseTo(4500, -1);
   });
 });
+
+describe('adult, activity unknown (blend of the adult categories)', () => {
+  it('lies between its categories and is weighted by their cases', async () => {
+    const { PROFILES } = await import('../config/modelParams');
+    const { distanceModelFor } = await import('./lpbDistance');
+    const adult = distanceModelFor(PROFILES.adult, 'mtn');
+    const hiker = distanceModelFor(PROFILES.hiker, 'mtn').model.quantile(0.5);
+    const despondent = distanceModelFor(PROFILES.despondent, 'mtn').model.quantile(0.5);
+    const med = adult.model.quantile(0.5);
+    expect(med).toBeGreaterThan(despondent);
+    expect(med).toBeLessThan(hiker);
+    expect(adult.table!.n).toBeGreaterThan(1000); // hikers alone are 568 cases in mountains
+    expect(adult.model.cdf(1e5)).toBeGreaterThan(0.98);
+  });
+  it('every person type has a usable distance model in every terrain', async () => {
+    const { PROFILES } = await import('../config/modelParams');
+    const { distanceModelFor } = await import('./lpbDistance');
+    for (const [id, p] of Object.entries(PROFILES)) {
+      if (!p.lpb) continue;
+      for (const t of ['mtn', 'flat', 'dryMtn', 'dryFlat', 'urban'] as const) {
+        const m = distanceModelFor(p, t).model;
+        const q50 = m.quantile(0.5);
+        expect(q50, `${id} ${t}`).toBeGreaterThan(10);
+        expect(q50, `${id} ${t}`).toBeLessThan(20000);
+      }
+    }
+  });
+});

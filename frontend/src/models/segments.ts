@@ -244,8 +244,32 @@ export function segmentArea(inp: SegmentInput): Segmentation {
     if (into.size === 0) break;
     id = id.map((v) => (v >= 0 && into.has(v) ? into.get(v)! : v));
   }
-  const n = compact(id);
-  // geometry
+  return segmentationFromIds(id, map, (centroid) => nameSegments(centroid, Math.sqrt(target)));
+}
+
+/**
+ * A Segmentation from a segment id per cell (−1 = none): areas, centroids, outlines and borders.
+ * `names` gives the names from the centroids, or is a list in id order (imported segments).
+ * Ids are compacted; segments with no cells are dropped.
+ */
+export function segmentationFromIds(ids: Int32Array, map: GridMap, names: string[] | ((centroid: [number, number][]) => string[])): Segmentation {
+  const id = ids.slice();
+  const { cols } = map;
+  const cell = 1 / map.inv;
+  // compact, remembering each new id's original
+  const orig: number[] = [];
+  const remap = new Map<number, number>();
+  for (let i = 0; i < id.length; i++) {
+    if (id[i] < 0) continue;
+    let m = remap.get(id[i]);
+    if (m === undefined) {
+      m = remap.size;
+      remap.set(id[i], m);
+      orig.push(id[i]);
+    }
+    id[i] = m;
+  }
+  const n = remap.size;
   const areaM2 = new Float64Array(n);
   const sx = new Float64Array(n);
   const sy = new Float64Array(n);
@@ -258,10 +282,10 @@ export function segmentArea(inp: SegmentInput): Segmentation {
     sy[k] += -(r - map.oy) / map.inv;
   }
   const centroid: [number, number][] = Array.from({ length: n }, (_, k) => [sx[k] / (areaM2[k] / (cell * cell)), sy[k] / (areaM2[k] / (cell * cell))]);
-  const names = nameSegments(centroid, Math.sqrt(target));
+  const nm = typeof names === 'function' ? names(centroid) : orig.map((o) => names[o] ?? `S${o + 1}`);
   const rings = traceOutlines(id, n, map).map((rs) => rs.map((ring) => simplify(ring, cell * SEGMENTS.simplifyCells)));
-  const borders = traceBorders(id, map).map((b) => ({ ...b, pts: simplifyOpen(b.pts, cell * SEGMENTS.simplifyCells) }));
-  return { id, n, names, areaM2, centroid, rings, borders };
+  const borders = traceBorders(id, map).map((bd) => ({ ...bd, pts: simplifyOpen(bd.pts, cell * SEGMENTS.simplifyCells) }));
+  return { id, n, names: nm, areaM2, centroid, rings, borders };
 }
 
 /** Rows of segments north to south get letters, west to east within a row get numbers: A1, A2, B1… */

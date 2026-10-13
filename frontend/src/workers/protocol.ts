@@ -72,6 +72,8 @@ export interface SegmentInfo {
 
 export interface SegmentsResult {
   t: number;
+  /** imported from the planning team's file, or cut automatically */
+  source: 'imported' | 'auto';
   /** segment per detail cell (-1 = none) */
   id: Int32Array;
   names: string[];
@@ -125,8 +127,12 @@ export type Request =
   | { type: 'heat'; t: number }
   | { type: 'deploy'; t: number; teams: number; hedge?: boolean; mode?: 'segments' | 'points' }
   | { type: 'segments'; t: number }
-  | { type: 'alert'; x: number; y: number; t: number }
-  | { type: 'searched'; sector: SearchedSector; t0: number; t1: number }
+  /** use the planning team's own segments (polygons in local metres); empty = automatic again */
+  | { type: 'importSegments'; polys: { name: string; xs: number[]; ys: number[] }[] }
+  | { type: 'alert'; id: string; x: number; y: number; t: number }
+  | { type: 'searched'; id: string; sector: SearchedSector; t0: number; t1: number }
+  /** drop one logged alert or searched area; the map is rebuilt from the rest */
+  | { type: 'removeEvent'; id: string }
   | { type: 'resetSearch' }
   | { type: 'mission'; mission: MissionId; source: SourceSpec }
   | { type: 'source'; source: SourceSpec }

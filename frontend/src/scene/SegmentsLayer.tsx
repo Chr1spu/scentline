@@ -3,7 +3,7 @@ import type { AreaBundle } from '../api/types';
 import { COLORS } from '../config/constants';
 import { toScene } from '../geo/heights';
 import { useStore } from '../state/store';
-import { CasedLine, Label } from './primitives';
+import { CasedLine, Label, TwoColourLine } from './primitives';
 
 /** Densify a ring every ~20 m so it hugs the terrain. */
 function densify(ring: [number, number][]): [number, number][] {
@@ -18,24 +18,9 @@ function densify(ring: [number, number][]): [number, number][] {
   return out;
 }
 
-/** Offset a polyline sideways by d metres (positive = to the left of travel). */
-function offset(pts: [number, number][], d: number): [number, number][] {
-  return pts.map((p, i) => {
-    const a = pts[Math.max(0, i - 1)];
-    const b = pts[Math.min(pts.length - 1, i + 1)];
-    const dx = b[0] - a[0];
-    const dy = b[1] - a[1];
-    const l = Math.hypot(dx, dy) || 1;
-    return [p[0] - (dy / l) * d, p[1] + (dx / l) * d] as [number, number];
-  });
-}
-
-const SPLIT_M = 7;
-
 /**
  * Search segment borders, each drawn once. An assigned segment's border is in its team's colour;
- * where two assigned segments meet, the border splits into two parallel lines, each colour on its
- * own segment's side.
+ * where two assigned segments meet, the one border line alternates dashes of both colours.
  */
 export function SegmentsLayer({ bundle }: { bundle: AreaBundle }) {
   const seg = useStore((s) => s.segments);
@@ -53,15 +38,14 @@ export function SegmentsLayer({ bundle }: { bundle: AreaBundle }) {
       const t = assigned.get(k);
       return t ? COLORS.team[(t - 1) % COLORS.team.length] : null;
     };
-    const out: { key: string; pts: [number, number][]; color: string; strong: boolean }[] = [];
+    const out: { key: string; pts: [number, number][]; color: string; color2?: string; strong: boolean }[] = [];
     seg.borders.forEach((b, i) => {
       const pts = densify(b.pts);
       const cl = b.left >= 0 ? teamColor(b.left) : null;
       const cr = b.right >= 0 ? teamColor(b.right) : null;
-      if (cl && cr) {
-        // two assigned neighbours: split the border, each colour on its own side
-        out.push({ key: `${i}l`, pts: offset(pts, SPLIT_M), color: cl, strong: true });
-        out.push({ key: `${i}r`, pts: offset(pts, -SPLIT_M), color: cr, strong: true });
+      if (cl && cr && cl !== cr) {
+        // two assigned neighbours: one line, dashes alternating between their colours
+        out.push({ key: `${i}`, pts, color: cl, color2: cr, strong: true });
       } else if (cl || cr) {
         out.push({ key: `${i}`, pts, color: (cl ?? cr)!, strong: true });
       } else {
@@ -75,7 +59,9 @@ export function SegmentsLayer({ bundle }: { bundle: AreaBundle }) {
   return (
     <group>
       {lines.map((l) =>
-        l.strong ? (
+        l.color2 ? (
+          <TwoColourLine key={l.key} bundle={bundle} pts={l.pts} colors={[l.color, l.color2]} />
+        ) : l.strong ? (
           <CasedLine key={l.key} bundle={bundle} pts={l.pts} color={l.color} width={4} casing={2} lift={6} />
         ) : (
           <CasedLine key={l.key} bundle={bundle} pts={l.pts} color={l.color} width={2} casing={1.5} lift={4} opacity={0.9} />

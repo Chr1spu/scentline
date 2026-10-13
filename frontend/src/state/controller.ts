@@ -14,6 +14,7 @@ import { groundY } from '../geo/heights';
 import { sunAt, weatherAt } from '../models/env';
 import { bestWindow, travelLimitBinds } from '../models/probability';
 import { alertWaypoints, localHour, parseGpx, scoreTrial, thinTrack, type GpxPoint, type TrackPoint } from '../models/validation';
+import { parseSegmentFile } from '../models/segmentImport';
 import { latLonToUtm, zoneFromCrs } from '../geo/utm';
 import { samplePoints, windConfidence, type WindConfidence } from '../models/windConfidence';
 import { buildTerrainInfo, shadowMask, type TerrainInfo } from '../models/terrainInfo';
@@ -362,7 +363,7 @@ export async function scoreTrialGpx(text: string, file: string) {
   if (!b) return;
   const zone = zoneFromCrs(b.detail.meta.crs);
   if (!zone) {
-    get().toast('This area is not on a UTM grid; GPX import needs one.', 'warn');
+    get().toast('GPS files cannot be used for this area.', 'warn');
     return;
   }
   const g = parseGpx(text);
@@ -379,7 +380,7 @@ export async function scoreTrialGpx(text: string, file: string) {
   const inside = (p: TrackPoint) => terrain !== null && cellAtLocal(p.x, p.y) >= 0;
   const pts = [...track, ...alerts].filter(inside);
   if (pts.filter((p) => p.alert).length === 0 || pts.length < 5) {
-    get().toast('Need a track and at least one alert waypoint inside the focus square.', 'warn');
+    get().toast('The file needs a track and at least one alert inside the planning square.', 'warn');
     return;
   }
   const times = pts.map((p) => p.t).filter((t): t is number => t !== null);
@@ -462,7 +463,7 @@ export async function setWindSource(src: 'windninja' | 'fallback') {
   const b = get().bundle;
   if (!b) return;
   if (src === 'windninja' && !b.windninja) {
-    get().toast('No WindNinja output for this area; using fallback wind.', 'warn');
+    get().toast('No terrain wind for this area; using the simple wind.', 'warn');
     return;
   }
   await applyWind(src, get().onsiteWind);
@@ -499,7 +500,7 @@ export async function setOnsiteWind(dir: number | null, speed: number | null) {
   }
   const hour = Math.min(Math.max(Math.round(get().time), b.config.windHours[0]), b.config.windHours[b.config.windHours.length - 1]);
   await applyWind(get().windSource, { hour, dir, speed });
-  get().toast(`On-site wind ${speed.toFixed(1)} m/s from ${Math.round(dir)}° applied to ${hour}:00 (fallback model)`, 'success');
+  get().toast(`Using your measured wind: ${speed.toFixed(1)} m/s from ${Math.round(dir)}°`, 'success');
 }
 
 /** Confidence in the modelled wind direction around the last known point at time t (null before load). */
@@ -563,9 +564,14 @@ export async function addAlert(lx: number, ly: number) {
     set({ time: near[2] });
   }
   const t = get().time;
-  const r = await withBusy('Alert triangulation', () => worker().call<AlertResult>({ type: 'alert', x: lx, y: ly, t }, progress('Alert triangulation')));
+  // moving an existing alert: same id, new place and time
+  const moving = get().movingAlert;
+  const id = moving ?? alertId++;
+  const r = await withBusy('Alert', () => worker().call<AlertResult>({ type: 'alert', id: `a${id}`, x: lx, y: ly, t }, progress('Alert')));
   if (!r) return;
-  const alerts = [...get().alerts, { id: alertId++, x: lx, y: ly, t, zone: r.zone }];
+  const alert = { id, x: lx, y: ly, t, zone: r.zone };
+  const alerts = moving !== null ? get().alerts.map((a) => (a.id === id ? alert : a)) : [...get().alerts, alert];
+  set({ movingAlert: null, tool: moving !== null ? 'none' : get().tool });
   set({ alerts, layers: { ...get().layers, alertZones: true, probability: true } });
   applyProb(r.prob);
   if (alerts.length >= 2 && !get().revealed && get().bundle?.config.truth && get().mission === 'wilderness') {
@@ -574,11 +580,35 @@ export async function addAlert(lx: number, ly: number) {
       get().toast('Found: the child is inside the overlap of the two traced zones.', 'success');
       flyTo(7);
     }, 900);
+  } else if (moving !== null) {
+    get().toast(`Alert moved (${fmtTime(t)}).`, 'info');
   } else if (r.fanElevation !== undefined) {
-    get().toast(`Alert ${alerts.length}: night alerts at the same elevation (~${Math.round(r.fanElevation)} m). On stable nights scent holds at its level: probability now leans to that contour.`, 'info');
+    get().toast(`Alert ${alerts.length} logged. Night alerts at the same height: the map now leans toward that height.`, 'info');
   } else {
-    get().toast(`Alert ${alerts.length} logged at ${fmtTime(t)}. Scent traced back one hour.`, 'info');
+    get().toast(`Alert ${alerts.length} logged at ${fmtTime(t)}.`, 'info');
   }
+}
+
+/** Remove one alert; the map is rebuilt from the others. */
+export async function removeAlert(id: number) {
+  const p = await withBusy('Updating', () => worker().call<ProbResult>({ type: 'removeEvent', id: `a${id}` }));
+  if (!p) return;
+  set({ alerts: get().alerts.filter((a) => a.id !== id), movingAlert: get().movingAlert === id ? null : get().movingAlert });
+  applyProb(p);
+}
+
+/** Start moving an alert: the next click on the map places it, at the time bar's time. */
+export function startMoveAlert(id: number) {
+  set({ movingAlert: id, tool: 'alert' });
+}
+
+/** Remove one searched area; the map is rebuilt from the rest. */
+export async function removeSearched(id: number) {
+  const p = await withBusy('Updating', () => worker().call<ProbResult>({ type: 'removeEvent', id: `s${id}` }));
+  if (!p) return;
+  set({ searched: get().searched.filter((s) => s.id !== id) });
+  applyProb(p);
+  if (get().segments) await refreshSegments();
 }
 
 let searchId = 1;
@@ -595,7 +625,7 @@ export async function endShift() {
   const longest = Math.max(...segDeps.map((d) => Math.min(d.segment!.hours, SEGMENTS.assignmentH)));
   const end = Math.min(bundle.config.endHour, time + longest);
   if (end - time < 0.25) {
-    get().toast('Not enough modelled time left for this shift: the time bar is at the end of the window.', 'warn');
+    get().toast('No time left in the planning window for another shift.', 'warn');
     return;
   }
   set({ time: end });
@@ -607,7 +637,7 @@ export async function endShift() {
   set({ deployments: [], shift: get().shift + 1 });
   scheduleHeat();
   await refreshSegments();
-  get().toast(`Shift logged: ${segDeps.length} segment${segDeps.length > 1 ? 's' : ''} searched with no alert. Plan shift ${get().shift} at ${fmtTime(end)}.`, 'info');
+  get().toast(`Shift logged. Plan shift ${get().shift} at ${fmtTime(end)}.`, 'info');
 }
 
 /** The most likely focus-square position for the current probability (overview grid). */
@@ -619,6 +649,53 @@ export function bestFocus(): { x: number; y: number; share: number } | null {
   const w = bestWindow(prob.overview, om.cols, om.rows, win);
   const [x, y] = cellCenterLocal(gridMap(om, bundle.frame), w.row * om.cols + w.col);
   return { x, y, share: w.share };
+}
+
+/**
+ * Use the planning team's own segments: polygons from a CalTopo / SARTopo / Google Earth export
+ * (KML or GeoJSON). Scentline scores those instead of cutting its own.
+ */
+export async function importSegments(text: string, file: string) {
+  const b = get().bundle;
+  if (!b) return;
+  const zone = zoneFromCrs(b.detail.meta.crs);
+  if (!zone) {
+    get().toast('Segments cannot be imported for this area.', 'warn');
+    return;
+  }
+  let polys;
+  try {
+    polys = parseSegmentFile(text);
+  } catch {
+    get().toast(`${file}: not a KML or GeoJSON file.`, 'warn');
+    return;
+  }
+  const local = polys.map((p) => {
+    const xs: number[] = [];
+    const ys: number[] = [];
+    for (const [lon, lat] of p.ring) {
+      const u = latLonToUtm(lat, lon, zone);
+      xs.push(u.e - b.frame.cx);
+      ys.push(u.n - b.frame.cy);
+    }
+    return { name: p.name, xs, ys };
+  });
+  const r = await withBusy('Importing segments', () => worker().call<{ kept: number }>({ type: 'importSegments', polys: local }));
+  if (!r) return;
+  if (r.kept === 0) {
+    get().toast(`${file}: no segments inside the planning square.`, 'warn');
+    return;
+  }
+  set({ deployments: [], assignMode: 'segments' });
+  await refreshSegments();
+  get().toast(`${r.kept} segment${r.kept > 1 ? 's' : ''} imported from ${file}.`, 'success');
+}
+
+/** Back to Scentline's own segments. */
+export async function useAutoSegments() {
+  await worker().call({ type: 'importSegments', polys: [] });
+  set({ deployments: [] });
+  await refreshSegments();
 }
 
 /** Score every search segment for a dog team at the time bar's time. */
@@ -649,7 +726,7 @@ export async function importSearchTrack(text: string, file: string) {
   if (!b) return;
   const zone = zoneFromCrs(b.detail.meta.crs);
   if (!zone) {
-    get().toast('This area is not on a UTM grid; GPX import needs one.', 'warn');
+    get().toast('GPS files cannot be used for this area.', 'warn');
     return;
   }
   const g = parseGpx(text);
@@ -660,7 +737,7 @@ export async function importSearchTrack(text: string, file: string) {
   };
   const pts = thinTrack(g.track.map(loc), 20).filter((p) => cellAtLocal(p.x, p.y) >= 0);
   if (pts.length < 2) {
-    get().toast(`${file}: no track inside the focus square.`, 'warn');
+    get().toast(`${file}: no track inside the planning square.`, 'warn');
     return;
   }
   const times = pts.map((p) => p.t).filter((t): t is number => t !== null);
@@ -690,12 +767,13 @@ export async function markSearched(sector: SectorShape, windowH?: number) {
   const t1 = time;
   const t0 = Math.max(bundle?.config.startHour ?? TIME.start, t1 - (windowH ?? searchDraft.windowMin / 60));
   if (t1 - t0 < 0.2) {
-    get().toast('Move the time slider later: the search window must end after the first modelled hour.', 'warn');
+    get().toast('Move the time bar later first.', 'warn');
     return;
   }
-  const r = await withBusy('Search update', () => worker().call<SearchResult>({ type: 'searched', sector, t0, t1 }, progress('Search update')));
+  const sid = searchId++;
+  const r = await withBusy('Updating', () => worker().call<SearchResult>({ type: 'searched', id: `s${sid}`, sector, t0, t1 }, progress('Updating')));
   if (!r) return;
-  set({ searched: [...get().searched, { id: searchId++, sector, t0, t1, meanDet: r.meanDet, recheck: r.recheck }], searchDraft: { ...get().searchDraft, pts: [] } });
+  set({ searched: [...get().searched, { id: sid, sector, t0, t1, meanDet: r.meanDet, recheck: r.recheck }], searchDraft: { ...get().searchDraft, pts: [] } });
   applyProb(r.prob);
   get().toast(r.recheck ? 'Searched in poor scent conditions: marked for a recheck.' : 'Searched with no alert. Probability moved elsewhere.', r.recheck ? 'warn' : 'info');
 }

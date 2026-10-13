@@ -136,6 +136,8 @@ export interface State {
   deployments: DeploymentOut[];
   alerts: Alert[];
   searched: SearchedSector[];
+  /** the alert being moved (next map click places it), or null */
+  movingAlert: number | null;
   /** operational period being planned (End shift moves to the next) */
   shift: number;
   /** how teams are assigned: whole search segments (default) or start points with routes */
@@ -215,6 +217,7 @@ export const useStore = create<State>((set, get) => ({
   deployments: [],
   alerts: [],
   searched: [],
+  movingAlert: null,
   shift: 1,
   assignMode: 'segments',
   segments: null,

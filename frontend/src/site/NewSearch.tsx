@@ -282,17 +282,27 @@ export function NewSearch() {
                 {ms.source === 'water' && 'Probability goes on the water nearest your point. Pick a point on or beside a lake or river.'}
               </p>
             )}
-            <div className="grid gap-1.5">
-              {(ms.profiles ?? []).map((id) => (
-                <label key={id} className={`flex cursor-pointer items-center justify-between rounded border px-3 py-2 text-sm ${profile === id ? 'border-ink bg-card' : 'border-rule hover:border-ink-3'}`}>
-                  <span className="flex items-center gap-2">
-                    <input type="radio" name="profile" checked={profile === id} onChange={() => setProfile(id)} className="accent-sar" />
-                    {PROFILES[id].label}
-                  </span>
-                  <span className="num text-xs text-ink-3">median {(PROFILES[id].medianM / 1000).toFixed(1)} km{PROFILES[id].lpb ? ' (mountains)' : ''}</span>
-                </label>
-              ))}
-            </div>
+            {ms.profiles && (
+              <label className="flex items-center justify-between gap-2 text-sm">
+                Who is missing
+                <select className="field !w-auto" value={profile} onChange={(e) => setProfile(e.target.value as ProfileId)}>
+                  {[...new Set(ms.profiles.map((id) => PROFILES[id].group ?? ''))].map((g) => {
+                    const opts = ms.profiles!.filter((id) => (PROFILES[id].group ?? '') === g).map((id) => (
+                      <option key={id} value={id}>
+                        {PROFILES[id].label}
+                      </option>
+                    ));
+                    return g ? (
+                      <optgroup key={g} label={g}>
+                        {opts}
+                      </optgroup>
+                    ) : (
+                      opts
+                    );
+                  })}
+                </select>
+              </label>
+            )}
             <label className="mt-3 flex items-center gap-2 text-sm">
               Dog teams available
               <input type="number" min={1} max={6} value={teams} onChange={(e) => setTeams(Math.min(6, Math.max(1, Number(e.target.value) || 1)))} className="field !w-16" />

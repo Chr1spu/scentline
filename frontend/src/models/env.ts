@@ -154,11 +154,11 @@ export function scentQuality(env: Env): { label: 'Good' | 'Fair' | 'Poor'; score
   const label = score > 1.2 ? 'Good' : score > 0.8 ? 'Fair' : 'Poor';
   const reason =
     env.sun.elevation < 0
-      ? 'stable evening air, scent pools in drainages'
+      ? 'cool evening air, scent settles in valleys'
       : lofting
-        ? 'sun-heated slopes loft scent upward'
+        ? 'sun lifts scent off the ground'
         : env.humidity > 70
           ? 'humid air holds scent'
-          : 'moderate conditions';
+          : 'average conditions';
   return { label, score, reason };
 }

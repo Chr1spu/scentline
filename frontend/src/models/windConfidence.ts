@@ -74,9 +74,9 @@ export function windConfidence(field: WindField, alt: WindField | null, map: Gri
     if (s > 0) reasons.push(why);
     score = Math.max(score, s);
   };
-  rate(now.speed, P.fairSpeed, P.poorSpeed, false, `light wind (${now.speed.toFixed(1)} m/s): its direction wanders`);
-  if (disagreeDeg !== null) rate(disagreeDeg, P.fairDisagreeDeg, P.poorDisagreeDeg, true, `the two wind models differ by ${Math.round(disagreeDeg)}°`);
-  rate(turnDeg, P.fairTurnDeg, P.poorTurnDeg, true, `the wind turns ${Math.round(turnDeg)}° within an hour either side`);
+  rate(now.speed, P.fairSpeed, P.poorSpeed, false, 'light wind');
+  if (disagreeDeg !== null) rate(disagreeDeg, P.fairDisagreeDeg, P.poorDisagreeDeg, true, 'wind models disagree');
+  rate(turnDeg, P.fairTurnDeg, P.poorTurnDeg, true, 'wind is turning');
   return { level: (['good', 'fair', 'poor'] as const)[score], speed: now.speed, disagreeDeg, turnDeg, reasons };
 }
 

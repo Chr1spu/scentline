@@ -81,11 +81,11 @@ function Briefing() {
           {state === 'idle' ? 'Read briefing' : state === 'loading' ? 'Preparing…' : 'Stop'}
         </button>
         <span className="text-[11px] leading-tight text-ink-3">
-          {voice === 'grok' ? 'Spoken by Grok Voice' : voice === 'browser' ? 'Browser voice (Grok Voice not available)' : 'For the radio: every team in one go'}
+          {voice === 'grok' ? 'Grok Voice' : voice === 'browser' ? 'Browser voice' : 'For the radio'}
         </span>
       </div>
       <details className="mt-1.5 text-[12px] leading-snug text-ink-2">
-        <summary className="cursor-pointer text-[11px] text-ink-3 hover:text-ink">Briefing text</summary>
+        <summary className="cursor-pointer text-[11px] text-ink-3 hover:text-ink">Show text</summary>
         <p className="mt-1">{text}</p>
       </details>
     </div>
@@ -108,11 +108,11 @@ function ExportButtons() {
   };
   return (
     <div className="flex items-center gap-1.5 text-[11px] text-ink-3">
-      <span>Export for GPS / CalTopo:</span>
-      <button className="btn btn-sm" onClick={() => save('gpx')} title="GPX: GPS units, CalTopo/SARTopo, Gaia">
+      <span>Save for GPS or CalTopo:</span>
+      <button className="btn btn-sm" onClick={() => save('gpx')} title="GPS units, CalTopo, Gaia">
         GPX
       </button>
-      <button className="btn btn-sm" onClick={() => save('kml')} title="KML: Google Earth, CalTopo">
+      <button className="btn btn-sm" onClick={() => save('kml')} title="Google Earth, CalTopo">
         KML
       </button>
     </div>
@@ -127,8 +127,7 @@ function Plan() {
     return (
       <div>
         <p className="text-[13px] leading-relaxed text-ink-2">
-          No teams placed yet. Set the time bar to when teams can start, then press <strong>Deploy</strong> in section 3. Each team gets a search segment (or a start
-          point), where to enter, a heading into the wind and its best hour.
+          No teams yet. Set the time bar to when teams can start and press <strong>Deploy</strong>.
         </p>
         <SegmentTable />
       </div>
@@ -139,11 +138,10 @@ function Plan() {
       <Briefing />
       <ExportButtons />
       {deployments.some((d) => d.segment) && <EndShift />}
-      <p className="text-xs text-ink-3">Planned for {fmtTime(time)}. Bars: scent score for each hour {deployments[0]?.segment ? 'across the segment' : 'at that point'}.</p>
+      <p className="text-xs text-ink-3">Plan for {fmtTime(time)}. The bars show the best hours.</p>
       {deployments.some((d) => d.kind === 'ground') && (
         <p className="rounded-sm border-l-2 border-amber bg-amber/10 px-2 py-1 text-xs leading-snug text-ink-2">
-          The forecast wind direction is uncertain here (see section 5), so the last team searches the most likely ground instead of a scent pick:
-          if the real wind is 30° or more off the forecast, that hedge finds more. Enter the measured wind and deploy again to place every team by scent.
+          The wind forecast is uncertain, so one team searches the most likely area instead. Measure the wind and deploy again to place every team by scent.
         </p>
       )}
       {deployments.map((d) => {
@@ -152,35 +150,33 @@ function Plan() {
         const dir = Math.round(((Math.atan2(d.upwind[0], d.upwind[1]) * 180) / Math.PI + 360) % 360);
         return (
           <div key={d.team} className="rounded-sm border border-rule bg-card px-2.5 py-2 text-[13px]">
-            <div className="flex items-center justify-between">
-              <span className="flex items-center gap-1.5 whitespace-nowrap font-semibold">
-                <span className="h-3 w-3 rounded-full" style={{ background: color }} />
+            <div className="flex flex-wrap items-center justify-between gap-x-2">
+              <span className="flex min-w-0 items-center gap-1.5 whitespace-nowrap font-semibold">
+                <span className="h-3 w-3 shrink-0 rounded-full" style={{ background: color }} />
                 Team {d.team}
-                {d.segment && <span className="rounded-sm bg-paper-2 px-1 text-[11px] font-semibold text-ink">Segment {d.segment.name}</span>}
-                {d.kind === 'ground' && <span className="rounded-sm bg-amber/15 px-1 text-[11px] font-normal text-ink-2">likely ground</span>}
+                {d.segment && <span className="max-w-[10rem] truncate rounded-sm bg-paper-2 px-1 text-[11px] font-semibold text-ink" title={d.segment.name}>Segment {d.segment.name}</span>}
+                {d.kind === 'ground' && <span className="rounded-sm bg-amber/15 px-1 text-[11px] font-normal text-ink-2">most likely area</span>}
               </span>
-              <span className="num whitespace-nowrap text-xs text-ink-2">covers {(d.coveredProb * 100).toFixed(1)}%</span>
+              <span className="num whitespace-nowrap text-xs text-ink-2" title="Chance this team finds the person">
+                {Math.round(d.coveredProb * 100)}% find chance
+              </span>
             </div>
             {d.segment && (
               <div className="mt-0.5 text-ink-2">
-                <span className="num">{Math.round(d.segment.areaM2 / 4046.86)}</span> acres, about <span className="num">{d.segment.hours.toFixed(1)}</span> h for one team. Holds{' '}
-                <span className="num">{(d.segment.poa * 100).toFixed(1)}%</span> of the probability; model POD for a person in it{' '}
-                <span className="num">{Math.round(d.segment.podInside * 100)}%</span>. Enter at the downwind edge:
+                <span className="num">{Math.round(d.segment.areaM2 / 4046.86)}</span> acres · about <span className="num">{d.segment.hours.toFixed(1)}</span> h. Start at the downwind edge:
               </div>
             )}
             {grid(d.x, d.y) && (
-              <div className="num mt-0.5 select-all text-[12px] text-ink" title="USNG / MGRS grid reference of the start point (1 m)">
+              <div className="num mt-0.5 select-all text-[12px] text-ink" title="Grid reference of the start (USNG)">
                 {grid(d.x, d.y)}
               </div>
             )}
             <div className="mt-1 text-ink-2">
-              Work toward <span className="num">{dir}°</span> ({compass(dir)}), into a <span className="num">{d.windSpeed.toFixed(1)} m/s</span> wind
+              Work {compass(dir)} (<span className="num">{dir}°</span>) into the wind
               {d.route && d.route.length > 1 ? (
                 <>
-                  , about <span className="num">{Math.round(((d.route.length - 1) * HOTSPOTS.routeStepM) / 50) * 50} m</span> upwind (dashed route; follow the wind as it bends).
+                  , about <span className="num">{Math.round(((d.route.length - 1) * HOTSPOTS.routeStepM) / 50) * 50} m</span> (dashed line).
                 </>
-              ) : d.segment ? (
-                '; the pattern inside is the handler\'s call.'
               ) : (
                 '.'
               )}
@@ -241,23 +237,25 @@ function SegmentTable() {
   return (
     <div className="mt-3 border-t border-rule pt-2">
       <div className="flex items-center justify-between">
-        <span className="text-xs font-semibold text-ink">Segments for a dog team at {fmtTime(time)}</span>
+        <span className="text-xs font-semibold text-ink">
+          Segments at {fmtTime(time)}
+          {seg?.source === 'imported' ? ' (yours)' : ''}
+        </span>
         <button className="text-xs text-ink-3 underline hover:text-ink disabled:opacity-50" disabled={busy} onClick={refreshSegments}>
-          {stale ? (seg ? 'Rescore' : 'Score') : 'Rescore'}
+          {seg ? 'Update' : 'Show'}
         </button>
       </div>
-      {seg && stale && <p className="mt-0.5 text-[11px] text-amber">Scored for {fmtTime(seg.t)} or before the latest changes: rescore.</p>}
+      {seg && stale && <p className="mt-0.5 text-[11px] text-amber">Out of date: press Update.</p>}
       {seg && (
         <>
           <table className="mt-1 w-full text-[11px]">
             <thead className="text-ink-3">
               <tr>
-                <th className="text-left font-normal" title="ICS-style segment name: rows A, B, … from north, numbered from west">Seg</th>
-                <th className="text-right font-normal" title="Share of the total probability inside">POA</th>
-                <th className="text-right font-normal" title="Model chance a dog team searching it finds a person who is in it">POD</th>
-                <th className="text-right font-normal" title="Expected find for one team: inside, plus scent drifting in from outside">Finds</th>
-                <th className="text-right font-normal" title="Hours for one team at a typical search pace">h</th>
-                <th className="text-right font-normal" title="Cumulative POD from searches logged so far">Done</th>
+                <th className="text-left font-normal">Segment</th>
+                <th className="text-right font-normal" title="Chance the person is in it">In it</th>
+                <th className="text-right font-normal" title="Chance one dog team finds them, counting scent drifting in from nearby">Find</th>
+                <th className="text-right font-normal" title="Hours for one team">Hours</th>
+                <th className="text-right font-normal" title="How thoroughly it has been searched so far">Searched</th>
                 <th />
               </tr>
             </thead>
@@ -265,19 +263,18 @@ function SegmentTable() {
               {rows.slice(0, all ? rows.length : 8).map((r) => {
                 const wait = recentlySearched(r.index);
                 return (
-                  <tr key={r.index} className="border-t border-rule/60" title={`${Math.round(r.areaM2 / ACRE)} acres; best ${fmtTime(r.bestWindow[0])} to ${fmtTime(r.bestWindow[1])}; enter from the downwind edge; ${(r.fromOutside * 100).toFixed(1)}% of the finds from scent drifting in`}>
+                  <tr key={r.index} className="border-t border-rule/60" title={`${Math.round(r.areaM2 / ACRE)} acres · best ${fmtTime(r.bestWindow[0])}–${fmtTime(r.bestWindow[1])}`}>
                     <td className="py-0.5 font-semibold text-ink">
                       {r.name}
-                      {wait && <span className="ml-1 rounded-sm bg-amber/20 px-0.5 font-normal text-ink-2" title={`Searched less than ${SEGMENTS.clearAirMin} min ago: give the air time to clear before a dog goes in`}>wait</span>}
+                      {wait && <span className="ml-1 rounded-sm bg-amber/20 px-0.5 font-normal text-ink-2" title={`Searched in the last ${SEGMENTS.clearAirMin} min: let the air clear before a dog goes in`}>wait</span>}
                     </td>
-                    <td className="text-right">{(r.poa * 100).toFixed(1)}%</td>
-                    <td className="text-right">{Math.round(r.podInside * 100)}%</td>
-                    <td className="text-right text-ink">{(r.value * 100).toFixed(1)}%</td>
+                    <td className="text-right">{Math.round(r.poa * 100)}%</td>
+                    <td className="text-right text-ink">{Math.round(r.value * 100)}%</td>
                     <td className="text-right">{r.hours.toFixed(1)}</td>
                     <td className="text-right">{r.podSearched > 0.005 ? `${Math.round(r.podSearched * 100)}%` : '–'}</td>
                     <td className="pl-1 text-right">
-                      <button className="text-ink-3 underline hover:text-ink" title="Mark this segment searched with no alert, over the time one team needs for it" onClick={() => markSegmentSearched(r.index)}>
-                        searched
+                      <button className="text-ink-3 underline hover:text-ink" title="Searched, nothing found" onClick={() => markSegmentSearched(r.index)}>
+                        done
                       </button>
                     </td>
                   </tr>
@@ -290,10 +287,7 @@ function SegmentTable() {
               {all ? 'Show the top 8' : `Show all ${rows.length}`}
             </button>
           )}
-          <p className="mt-1 text-[11px] leading-snug text-ink-3">
-            POA: share of the probability inside. POD: model chance a dog team searching the segment finds a person in it. Finds: what one team would find, including scent drifting in
-            from outside. Modelled, not observed.
-          </p>
+          <p className="mt-1 text-[11px] leading-snug text-ink-3">Estimates, not observations. Hover a heading for what it means.</p>
         </>
       )}
     </div>
@@ -350,17 +344,12 @@ function Notes() {
         </ol>
         <p className="mt-1.5 text-xs text-sar-dark">Limit: {mission.caveat}</p>
       </div>
-      <p>The scent model is a set of simplified rules, not a validated simulation. Use it alongside experienced handlers.</p>
+      <p>Scentline gives estimates to plan with, not facts. Use it alongside experienced handlers and your own judgement.</p>
       <ul className="list-disc space-y-1 pl-4">
-        <li>Wind: {windSource === 'windninja' ? 'WindNinja, terrain-adjusted, hourly' : 'forecast plus a slope-wind rule'}; scent moves with it at 0.6 m.</li>
-        <li>Scent is released continuously, fades in heat and sun, lifts off sunny slopes, pools in calm hollows.</li>
-        <li>Detectability is measured against neutral scent conditions.</li>
-        <li>
-          Detection: a dog finds one person {DETECTION.d50M} m straight downwind half the time in a steady {DETECTION.refWind} m/s wind, more often closer; plus close range within{' '}
-          {HOTSPOTS.nearRadiusM} m of its route. Then a 70% chance the team acts on it.
-        </li>
-        <li>Each team works about {HOTSPOTS.routeM} m upwind from its start, following the modelled wind; starts are {HOTSPOTS.suppressRadiusM} m apart.</li>
-        <li>When the forecast direction is uncertain and the wind isn&apos;t measured, one of three or more teams covers the most likely ground as a hedge.</li>
+        <li>Where they might be comes from where thousands of lost people were actually found.</li>
+        <li>Wind: {windSource === 'windninja' ? 'shaped by the terrain, hour by hour' : 'forecast, adjusted for slopes'}. Scent drifts with it, fades in heat and sun, and collects in hollows at night.</li>
+        <li>A dog is assumed to smell a person about {DETECTION.d50M} m downwind half the time in a steady breeze.</li>
+        <li>Measure the wind on site: when the forecast is off, the plan is too.</li>
       </ul>
       {sources.length > 0 && <p className="text-xs text-ink-3">Data: {sources.join(', ')}.</p>}
       <p>
@@ -414,11 +403,9 @@ function EndShift() {
   const busy = useStore((s) => !!s.busy);
   return (
     <div className="flex items-center gap-2 rounded-sm border border-rule bg-card px-2 py-1.5 text-xs text-ink-2">
-      <span className="flex-1 leading-snug">
-        Shift {shift}. If the teams come back with no alert, log it here and plan the next shift around what is left.
-      </span>
-      <button className="btn btn-sm whitespace-nowrap" disabled={busy} onClick={endShift}>
-        End shift: no finds
+      <span className="flex-1 leading-snug">Shift {shift}. Teams back with nothing found?</span>
+      <button className="btn btn-sm whitespace-nowrap" disabled={busy} onClick={endShift} title="Log these segments as searched and plan the next shift">
+        End shift
       </button>
     </div>
   );

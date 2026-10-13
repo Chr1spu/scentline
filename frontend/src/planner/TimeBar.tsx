@@ -56,7 +56,7 @@ export function TimeBar() {
   const { env, mean } = info;
   const model = heat && Math.abs(heat.t - time) < 1e-6 ? heat.relStrength : null;
   const label = model !== null ? (model > 0.8 ? 'Good' : model > 0.55 ? 'Fair' : 'Poor') : info.q.label;
-  const detail = model !== null ? `${Math.round(model * 100)}% of neutral` : info.q.reason;
+  const detail = info.q.reason;
   const tone = label === 'Good' ? 'text-forest' : label === 'Fair' ? 'text-amber' : 'text-sar-dark';
   const ticks: number[] = [];
   for (let h = t0; h <= t1; h++) ticks.push(h);

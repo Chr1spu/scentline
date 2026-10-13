@@ -8,8 +8,23 @@ export type ProfileId =
   | 'child46'
   | 'child79'
   | 'child1012'
+  | 'youth1315'
+  | 'adult'
   | 'hiker'
+  | 'hunter'
+  | 'gatherer'
+  | 'camper'
+  | 'angler'
+  | 'mtnBiker'
+  | 'horseRider'
+  | 'skierNordic'
+  | 'worker'
   | 'dementia'
+  | 'autistic'
+  | 'intellectual'
+  | 'mentalIllness'
+  | 'despondent'
+  | 'substance'
   /** older names, kept so saved links keep working: 1–6 → 4–6, 7–12 → 7–9 */
   | 'child16'
   | 'child712'
@@ -57,7 +72,15 @@ export interface ProfileParams {
    * Lost Person Behavior tables: distance quantiles by terrain class (missing classes fall back to
    * the nearest one) and the dispersion angle quantiles (degrees off the intended direction).
    */
-  lpb?: { distanceKm: Partial<Record<TerrainClass, DistanceTable>>; dispersionDeg?: [number, number, number, number]; table: string };
+  lpb?: {
+    distanceKm: Partial<Record<TerrainClass, DistanceTable>>;
+    dispersionDeg?: [number, number, number, number];
+    table: string;
+    /** a blend of these categories, weighted by their number of cases (no table of its own) */
+    mixOf?: ProfileId[];
+  };
+  /** heading in the "who is missing" picker */
+  group?: 'Children' | 'Adults' | 'Health and state of mind';
   /** optional preference by land-cover class (1 water … 6 wetland); missing classes = 1 */
   landcoverWeight?: Partial<Record<number, number>>;
   /**
@@ -80,28 +103,64 @@ const LPB = {
   child1012: { distanceKm: { mtn: { n: 72, q: [0.8, 1.6, 3.2, 9.0] }, flat: { n: 57, q: [0.4, 1.6, 4.8, 10.0] }, dryMtn: { n: 22, q: [0.8, 2.0, 7.2, 16.1] }, urban: { n: 18, q: [0.3, 1.5, 2.9, 5.8] } }, dispersionDeg: [21, 40, 57, 146], table: 'Child (10–12), p. 145' },
   hiker: { distanceKm: { mtn: { n: 568, q: [1.1, 3.1, 5.8, 18.3] }, flat: { n: 274, q: [0.6, 1.8, 3.2, 9.9] }, dryMtn: { n: 221, q: [1.6, 3.2, 6.5, 19.3] }, dryFlat: { n: 58, q: [1.3, 2.1, 6.6, 13.1] } }, dispersionDeg: [2, 23, 64, 132], table: 'Hiker, p. 184' },
   dementia: { distanceKm: { mtn: { n: 95, q: [0.3, 0.8, 1.9, 8.3] }, flat: { n: 175, q: [0.3, 1.0, 2.4, 12.8] }, dryMtn: { n: 14, q: [1.0, 1.9, 3.1, 6.1] }, dryFlat: { n: 15, q: [0.5, 1.6, 3.6, 11.8] }, urban: { n: 336, q: [0.3, 1.1, 3.2, 12.6] } }, dispersionDeg: [11, 23, 66, 70], table: 'Dementia, p. 164' },
+  youth1315: { distanceKm: { mtn: { n: 74, q: [0.8, 2.1, 4.8, 21.4] }, flat: { n: 80, q: [0.6, 1.3, 3.2, 10.0] }, dryMtn: { n: 19, q: [2.4, 3.2, 4.8, 11.9] } }, dispersionDeg: [0, 6, 48, 139], table: 'Child/Youth (13–15), p. 151' },
+  hunter: { distanceKm: { mtn: { n: 355, q: [1.0, 2.1, 4.8, 17.2] }, flat: { n: 465, q: [0.6, 1.6, 3.1, 13.7] }, dryMtn: { n: 138, q: [2.1, 4.8, 8.1, 22.2] }, dryFlat: { n: 40, q: [1.6, 3.1, 6.4, 11.3] } }, dispersionDeg: [12, 45, 90, 156], table: 'Hunter, p. 194' },
+  gatherer: { distanceKm: { mtn: { n: 94, q: [1.5, 3.2, 6.4, 12.9] }, dryMtn: { n: 14, q: [1.6, 2.6, 5.8, 11.1] } }, table: 'Gatherer, p. 180' },
+  camper: { distanceKm: { mtn: { n: 17, q: [0.2, 2.2, 3.0, 39.5] }, flat: { n: 18, q: [0.2, 1.1, 3.2, 12.8] }, dryMtn: { n: 26, q: [0.6, 1.6, 4.2, 32.5] } }, table: 'Camper, p. 121' },
+  angler: { distanceKm: { mtn: { n: 25, q: [0.3, 1.5, 5.5, 9.9] }, flat: { n: 62, q: [0.8, 1.6, 3.9, 14.9] }, dryMtn: { n: 15, q: [3.2, 9.7, 10.5, 13.0] } }, dispersionDeg: [28, 50, 59, 111], table: 'Angler, p. 107' },
+  mtnBiker: { distanceKm: { mtn: { n: 25, q: [3.1, 4.0, 11.3, 25.0] }, dryMtn: { n: 32, q: [2.7, 6.4, 13.2, 29.1] } }, table: 'Mountain Biker, p. 215' },
+  horseRider: { distanceKm: { mtn: { n: 17, q: [0.3, 3.2, 8.1, 19.8] } }, table: 'Horseback Rider (all terrain), p. 190' },
+  skierNordic: { distanceKm: { mtn: { n: 29, q: [1.6, 3.5, 6.4, 19.6] }, dryMtn: { n: 41, q: [1.9, 4.3, 6.4, 19.5] } }, table: 'Skier-Nordic, p. 237' },
+  worker: { distanceKm: { mtn: { n: 29, q: [1.0, 1.9, 3.2, 11.8] } }, table: 'Worker, p. 290' },
+  autistic: { distanceKm: { mtn: { n: 20, q: [0.6, 1.6, 3.7, 15.2] }, urban: { n: 16, q: [0.3, 1.0, 3.8, 8.0] } }, table: 'Autistic (temperate), p. 117' },
+  intellectual: { distanceKm: { mtn: { n: 31, q: [0.6, 1.6, 3.2, 11.3] }, flat: { n: 36, q: [0.3, 1.0, 2.1, 11.8] }, dryMtn: { n: 21, q: [1.1, 4.0, 8.7, 62.6] }, urban: { n: 44, q: [0.3, 0.8, 3.7, 9.9] } }, table: 'Intellectual disability (“Mental Retardation”), p. 208' },
+  mentalIllness: { distanceKm: { mtn: { n: 23, q: [0.6, 2.3, 8.3, 14.6] }, flat: { n: 23, q: [0.8, 1.0, 2.3, 8.1] }, urban: { n: 38, q: [0.3, 0.6, 1.5, 12.5] } }, table: 'Mental Illness, p. 201' },
+  despondent: { distanceKm: { mtn: { n: 103, q: [0.3, 1.1, 3.2, 21.6] }, flat: { n: 193, q: [0.3, 0.8, 2.3, 17.3] }, dryMtn: { n: 20, q: [0.8, 1.6, 3.4, 18.0] }, dryFlat: { n: 14, q: [0.5, 1.9, 3.7, 20.7] }, urban: { n: 96, q: [0.1, 0.5, 1.5, 13.1] } }, dispersionDeg: [0, 0, 3, 30], table: 'Despondent, p. 173' },
+  substance: { distanceKm: { mtn: { n: 15, q: [0.5, 1.1, 4.2, 9.7] } }, table: 'Substance Abuse (temperate), p. 257' },
 } satisfies Record<string, ProfileParams['lpb']>;
 
-const child = (label: string, lpb: ProfileParams['lpb'], speed: number, alias = false): ProfileParams => ({
+const person = (label: string, lpb: ProfileParams['lpb'], group: ProfileParams['group'], speed: number, trackOffsetM = 100): ProfileParams => ({
   label,
-  medianM: lpb!.distanceKm.mtn!.q[1] * 1000,
+  medianM: (lpb!.distanceKm.mtn ?? Object.values(lpb!.distanceKm)[0])?.q[1] ? (lpb!.distanceKm.mtn ?? Object.values(lpb!.distanceKm)[0])!.q[1] * 1000 : 1000,
   spread: 0.9,
   featureA: 1,
   featureL: 150,
   maxSpeedKmh: speed,
-  terrain: { trackOffsetM: 100 },
+  terrain: { trackOffsetM },
   lpb,
-  alias,
+  group,
   note: `Lost Person Behavior, ${lpb!.table}`,
 });
+
+const child = (label: string, lpb: ProfileParams['lpb'], speed: number, alias = false): ProfileParams => ({ ...person(label, lpb, 'Children', speed), alias });
 
 export const PROFILES: Record<ProfileId, ProfileParams> = {
   child13: child('Child (1–3)', LPB.child13, 1.5),
   child46: child('Child (4–6)', LPB.child46, 2),
   child79: child('Child (7–9)', LPB.child79, 3),
   child1012: child('Child (10–12)', LPB.child1012, 3),
-  hiker: { label: 'Hiker', medianM: 3100, spread: 1.25, featureA: 3, featureL: 150, maxSpeedKmh: 4, terrain: { trackOffsetM: 100 }, lpb: LPB.hiker, note: 'Lost Person Behavior, Hiker, p. 184' },
-  dementia: { label: 'Person with dementia', medianM: 800, spread: 1.5, featureA: 1, featureL: 150, maxSpeedKmh: 3, terrain: { trackOffsetM: 15 }, lpb: LPB.dementia, note: 'Lost Person Behavior, Dementia, p. 164' },
+  youth1315: child('Teen (13–15)', LPB.youth1315, 4),
+  // adults, activity unknown: the adult categories blended by their number of cases
+  adult: {
+    ...person('Adult, activity unknown', { distanceKm: {}, table: 'adult categories combined', mixOf: ['hiker', 'hunter', 'gatherer', 'camper', 'angler', 'worker', 'despondent', 'mentalIllness', 'substance'] }, 'Adults', 4),
+    medianM: 1800,
+    note: 'Lost Person Behavior: hikers, hunters, gatherers, campers, anglers, workers, despondent, mental illness and substance use combined by number of cases',
+  },
+  hiker: person('Hiker', LPB.hiker, 'Adults', 4),
+  hunter: person('Hunter', LPB.hunter, 'Adults', 4),
+  gatherer: person('Gatherer (berries, mushrooms…)', LPB.gatherer, 'Adults', 4),
+  camper: person('Camper', LPB.camper, 'Adults', 4),
+  angler: person('Angler', LPB.angler, 'Adults', 4),
+  mtnBiker: person('Mountain biker', LPB.mtnBiker, 'Adults', 12),
+  horseRider: person('Horse rider', LPB.horseRider, 'Adults', 10),
+  skierNordic: person('Cross-country skier', LPB.skierNordic, 'Adults', 8),
+  worker: person('Outdoor worker', LPB.worker, 'Adults', 4),
+  dementia: person('Dementia', LPB.dementia, 'Health and state of mind', 3, 15),
+  autistic: person('Autism', LPB.autistic, 'Health and state of mind', 3, 15),
+  intellectual: person('Intellectual disability', LPB.intellectual, 'Health and state of mind', 3, 15),
+  mentalIllness: person('Mental illness', LPB.mentalIllness, 'Health and state of mind', 4, 23),
+  despondent: person('Despondent (may be suicidal)', LPB.despondent, 'Health and state of mind', 4, 50),
+  substance: person('Under the influence', LPB.substance, 'Health and state of mind', 3),
   child16: child('Child (4–6)', LPB.child46, 2, true),
   child712: child('Child (7–9)', LPB.child79, 3, true),
   // lost pets: cats hide in cover close by (Huang et al. 2018: indoor-only cats median 39 m,

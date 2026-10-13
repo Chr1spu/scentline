@@ -33,7 +33,8 @@ import { buildTerrainInfo, LC, type TerrainInfo } from '../models/terrainInfo';
 import { alertLikelihood, argmax, backtrace, driftPoint, elevationBand, fanningClue, type AlertRecord } from '../models/triangulation';
 import { sampleWind, type WindField } from '../models/wind';
 import type { AlertResult, DeploymentOut, Envelope, HeatResult, InitMsg, ProbResult, Reply, SearchResult, SegmentInfo, SegmentsResult, SourceSpec } from './protocol';
-import { assignSegments, receiversOfSegments, scoreSegments, segmentArea, segmentBoundary, segmentConditions, segmentHours, sweepDetection, type Segmentation } from '../models/segments';
+import { assignSegments, receiversOfSegments, scoreSegments, segmentArea, segmentationFromIds, segmentBoundary, segmentConditions, segmentHours, sweepDetection, type Segmentation } from '../models/segments';
+import { rasterizeSegments } from '../models/segmentImport';
 
 const ctx = self as unknown as DedicatedWorkerGlobalScope;
 
@@ -64,13 +65,16 @@ interface State {
   elapsedH: number | undefined;
   /** planning ensemble spread (±degrees) */
   rotDeg: number;
-  /** search segments of the focus square (built on first use) */
+  /** search segments of the focus square (built on first use, or imported) */
   seg: Segmentation | null;
+  segImported: boolean;
   /** product of negative-update (searched, no alert) factors per detail cell */
   Lneg: Float32Array;
   /** alerts so far (elevation, stable air) and the elevations already used as fanning clues */
   alertLog: AlertRecord[];
   fanUsed: number[];
+  /** every logged alert and searched area, in order: L, Lneg and outside are rebuilt from these */
+  events: SearchEvent[];
   /** intended direction of travel (degrees from north) or null */
   travelDir: number | null;
   /** Lost Person Behavior terrain table: chosen, or 'auto' (by relief) */
@@ -137,9 +141,11 @@ function init(m: InitMsg) {
     elapsedH: undefined,
     rotDeg: ENSEMBLE.rotDeg,
     seg: null,
+    segImported: false,
     Lneg: new Float32Array(nD).fill(1),
     alertLog: [],
     fanUsed: [],
+    events: [],
     travelDir: null,
     terrainClass: 'auto',
     prior: null,
@@ -283,11 +289,8 @@ function setMission(mission: MissionId, source: SourceSpec): ProbResult {
   setTuning(t);
   pool?.setTuning(t);
   s.deployable = deployableCells(s.ti, s.detailWater, s.cliff, { maxSlopeDeg: t.maxSlopeDeg, mode: t.deploy });
-  s.L.fill(1);
-  s.Lneg.fill(1);
-  s.alertLog = [];
-  s.fanUsed = [];
-  s.outside = 1;
+  s.events = [];
+  rebuildLikelihood();
   s.source = source;
   s.prior = null;
   recomputePrior();
@@ -480,7 +483,7 @@ async function segmentsAt(t: number, report: (f: number, l: string) => void): Pr
       windowScores: ws,
     };
   });
-  return { t, id: seg.id.slice(), names: seg.names, rings: seg.rings, borders: seg.borders, centroid: seg.centroid, segs };
+  return { t, source: s.segImported ? 'imported' : 'auto', id: seg.id.slice(), names: seg.names, rings: seg.rings, borders: seg.borders, centroid: seg.centroid, segs };
 }
 
 /** Assign teams to whole segments (the handler picks the pattern inside). */
@@ -598,26 +601,47 @@ async function trialDetection(pts: [number, number][], t: number, report: (f: nu
   return out;
 }
 
-function alert(x: number, y: number, t: number, report: (f: number, l: string) => void): AlertResult {
+interface SearchEvent {
+  id: string;
+  kind: 'alert' | 'searched';
+  /** likelihood per detail cell */
+  L: Float32Array;
+  /** likelihood for the probability outside the focus square (alerts) */
+  outside: number;
+  /** alerts: elevation and whether the air was stable (fanning-plume clue) */
+  z?: number;
+  stable?: boolean;
+}
+
+/**
+ * Rebuild the search likelihood from the logged events, in order: alerts multiply in their
+ * back-traced zones (and any fanning-plume clue they complete), searched areas their no-alert
+ * factors. Returns the elevation of a fanning clue completed by the event with `clueFor`, if any.
+ */
+function rebuildLikelihood(clueFor?: string): number | undefined {
   const s = st();
-  report(0.2, 'Back-tracing scent from alert');
-  const { sigmaA } = meanderFor(envAt(s.init.place, s.init.weather, t), TRIANGULATION.dt);
-  const zone = backtrace({ ti: s.ti, field: s.wind, t, x, y, sigmaA, seed: Math.round(x * 7 + y * 13 + t * 100) });
-  const L = alertLikelihood(zone);
-  for (let i = 0; i < L.length; i++) s.L[i] *= L[i];
-  // fanning plumes: night alerts at one elevation point to that elevation
-  const c = cellAt(s.ti.map, x, y);
-  const stable = stabilityClass(envAt(s.init.place, s.init.weather, t)) >= TRIANGULATION.fanMinClass;
-  s.alertLog.push({ z: c >= 0 ? s.ti.elev[c] : 0, stable });
+  s.L.fill(1);
+  s.Lneg.fill(1);
+  s.outside = 1;
+  s.alertLog = [];
+  s.fanUsed = [];
   let fanElevation: number | undefined;
-  const fz = fanningClue(s.alertLog);
-  if (fz !== null && !s.fanUsed.some((u) => Math.abs(u - fz) <= TRIANGULATION.fanMatchM)) {
-    const band = elevationBand(s.ti.elev, fz);
-    for (let i = 0; i < band.length; i++) s.L[i] *= band[i];
-    s.fanUsed.push(fz);
-    fanElevation = fz;
+  for (const ev of s.events) {
+    for (let i = 0; i < s.L.length; i++) s.L[i] *= ev.L[i];
+    if (ev.kind === 'searched') {
+      for (let i = 0; i < s.Lneg.length; i++) s.Lneg[i] *= ev.L[i];
+      continue;
+    }
+    s.outside *= ev.outside;
+    s.alertLog.push({ z: ev.z ?? 0, stable: !!ev.stable });
+    const fz = fanningClue(s.alertLog);
+    if (fz !== null && !s.fanUsed.some((u) => Math.abs(u - fz) <= TRIANGULATION.fanMatchM)) {
+      const band = elevationBand(s.ti.elev, fz);
+      for (let i = 0; i < band.length; i++) s.L[i] *= band[i];
+      s.fanUsed.push(fz);
+      if (ev.id === clueFor) fanElevation = fz;
+    }
   }
-  s.outside *= alertLikelihood(new Float32Array(1))[0];
   // keep the likelihood well-scaled
   let mx = 0;
   for (let i = 0; i < s.L.length; i++) mx = Math.max(mx, s.L[i]);
@@ -625,20 +649,33 @@ function alert(x: number, y: number, t: number, report: (f: number, l: string) =
     for (let i = 0; i < s.L.length; i++) s.L[i] /= mx;
     s.outside /= mx;
   }
+  return fanElevation;
+}
+
+function alert(id: string, x: number, y: number, t: number, report: (f: number, l: string) => void): AlertResult {
+  const s = st();
+  report(0.2, 'Back-tracing scent from alert');
+  const { sigmaA } = meanderFor(envAt(s.init.place, s.init.weather, t), TRIANGULATION.dt);
+  const zone = backtrace({ ti: s.ti, field: s.wind, t, x, y, sigmaA, seed: Math.round(x * 7 + y * 13 + t * 100) });
+  const c = cellAt(s.ti.map, x, y);
+  // fanning plumes: night alerts at one elevation point to that elevation
+  const stable = stabilityClass(envAt(s.init.place, s.init.weather, t)) >= TRIANGULATION.fanMinClass;
+  s.events = s.events.filter((e) => e.id !== id);
+  s.events.push({ id, kind: 'alert', L: alertLikelihood(zone), outside: alertLikelihood(new Float32Array(1))[0], z: c >= 0 ? s.ti.elev[c] : 0, stable });
+  const fanElevation = rebuildLikelihood(id);
   report(0.9, 'Updating probability');
   return { zone, prob: recomputePosterior(), fanElevation };
 }
 
-async function searched(sector: SearchedSector, t0: number, t1: number, report: (f: number, l: string) => void): Promise<SearchResult> {
+async function searched(id: string, sector: SearchedSector, t0: number, t1: number, report: (f: number, l: string) => void): Promise<SearchResult> {
   const s = st();
   const windowMin = Math.max(15, Math.round((t1 - t0) * 60));
   const e = await ensembleAt(t1, (f, l) => report(f * 0.9, l), windowMin);
   const det = detectionAt(e, t1);
   const r = searchUpdate({ sector, det, blocks: s.blocks, heatRecv: e.heatRecv, th: e.thRecv, map: s.ti.map, pod: MISSIONS[s.mission].tuning.pod, insideDet: sweepDetection(e.relStrength) });
-  for (let i = 0; i < s.L.length; i++) {
-    s.L[i] *= r.factor[i];
-    s.Lneg[i] *= r.factor[i];
-  }
+  s.events = s.events.filter((ev) => ev.id !== id);
+  s.events.push({ id, kind: 'searched', L: r.factor, outside: 1 });
+  rebuildLikelihood();
   return { meanDet: r.meanDet, recheck: r.recheck, prob: recomputePosterior() };
 }
 
@@ -753,6 +790,21 @@ async function handle({ id, req }: Envelope): Promise<void> {
       case 'deploy':
         result = await deploy(req.t, req.teams, !!req.hedge, report, req.mode);
         break;
+      case 'importSegments': {
+        const s = st();
+        if (req.polys.length === 0) {
+          s.seg = null;
+          s.segImported = false;
+          result = { kept: 0 };
+          break;
+        }
+        const ids = rasterizeSegments(req.polys, s.ti.meta.cols, s.ti.meta.rows, (i) => cellCenterLocal(s.ti.map, i), s.detailWater);
+        const seg = segmentationFromIds(ids, s.ti.map, req.polys.map((p) => p.name));
+        s.seg = seg.n > 0 ? seg : null;
+        s.segImported = seg.n > 0;
+        result = { kept: seg.n };
+        break;
+      }
       case 'segments':
         result = await segmentsAt(req.t, report);
         break;
@@ -760,18 +812,22 @@ async function handle({ id, req }: Envelope): Promise<void> {
         result = await trialDetection(req.pts, req.t, report);
         break;
       case 'alert':
-        result = alert(req.x, req.y, req.t, report);
+        result = alert(req.id, req.x, req.y, req.t, report);
         break;
       case 'searched':
-        result = await searched(req.sector, req.t0, req.t1, report);
+        result = await searched(req.id, req.sector, req.t0, req.t1, report);
         break;
+      case 'removeEvent': {
+        const s = st();
+        s.events = s.events.filter((e) => e.id !== req.id);
+        rebuildLikelihood();
+        result = recomputePosterior();
+        break;
+      }
       case 'resetSearch': {
         const s = st();
-        s.L.fill(1);
-        s.Lneg.fill(1);
-        s.alertLog = [];
-        s.fanUsed = [];
-        s.outside = 1;
+        s.events = [];
+        rebuildLikelihood();
         s.edits.fill(1);
         recomputePrior();
         result = recomputePosterior();

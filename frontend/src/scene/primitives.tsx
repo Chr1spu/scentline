@@ -63,6 +63,28 @@ export function CasedLine({ bundle, pts, color, width = 2.5, casing = 2.5, lift 
   );
 }
 
+/**
+ * One line on a shared border, alternating dashes of two colours over a dark casing: the border
+ * belongs to both segments.
+ */
+export function TwoColourLine({ bundle, pts, colors, width = 4, casing = 2, lift = 6, dash = 22 }: { bundle: AreaBundle; pts: [number, number][]; colors: [string, string]; width?: number; casing?: number; lift?: number; dash?: number }) {
+  const points = useMemo(() => {
+    const a = drapedPath(bundle, pts, lift);
+    const v: [number, number, number][] = [];
+    for (let i = 0; i < a.length; i += 3) v.push([a[i], a[i + 1], a[i + 2]]);
+    return v;
+  }, [bundle, pts, lift]);
+  if (points.length < 2) return null;
+  const d = dash * VERT_EXAG;
+  return (
+    <group>
+      <Line points={points} color="#0d110f" lineWidth={width + 2 * casing} transparent opacity={0.85} depthTest={false} renderOrder={8} />
+      <Line points={points} color={colors[0]} lineWidth={width} dashed dashSize={d} gapSize={d} transparent depthTest={false} renderOrder={9} />
+      <Line points={points} color={colors[1]} lineWidth={width} dashed dashSize={d} gapSize={d} dashOffset={d} transparent depthTest={false} renderOrder={9} />
+    </group>
+  );
+}
+
 /** Vertical light beam + pulsing ground ring. */
 export function Beacon({ position, color, height = 140, radius = 22, pulse = true }: { position: [number, number, number]; color: string; height?: number; radius?: number; pulse?: boolean }) {
   const ring = useRef<THREE.Mesh>(null);

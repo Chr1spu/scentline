@@ -12,17 +12,18 @@ const WALK = [
 ];
 
 const CONTROLS: [string, string][] = [
-  ['Subject', 'Choose the profile. It sets how far the person probably went (median 0.3 km for a young child, 3.1 km for a hiker).'],
+  ['Who', 'Who is missing: children by age, adults by activity (hiker, hunter, berry picker, angler and more), or by state of mind (dementia, despondent and others). Not sure why an adult is out? Pick “Adult, activity unknown”. It sets how far the person probably went (median 0.3 km for a young child, 3.1 km for a hiker).'],
   ['Place LKP', 'Then click the terrain to move the last known point.'],
   ['Raise / Lower', 'Click to double or halve the probability within 250 m, for local knowledge.'],
   ['Release scent', 'Starts the visible scent particles.'],
   ['Heatmap', 'Scent of the last hour and the hotspots. Recomputed when the time changes (about 2 s).'],
-  ['Teams, Deploy', 'Number of teams (1 to 6) and the deployment itself. Segments (default) assigns whole search segments; Start points gives each team a start and an upwind route, for hasty searches.'],
+  ['Teams, Deploy', 'Number of teams (1 to 6) and the deployment itself. Segments (default) assigns whole search segments; Hasty gives each team a start point and an upwind route, for the first hour or a quick check of a scent hotspot.'],
+  ['Your own segments', 'Under Deploy: “Use your own segments” loads the segments your planning team already drew, as a KML or GeoJSON export from CalTopo, SARTopo or Google Earth. Scentline scores and assigns those instead of cutting its own; “Use automatic” switches back.'],
   ['Segment table', 'Plan tab: every segment for a dog team at the time bar’s time, best first: POA, POD, expected finds, hours for one team, cumulative POD from searches logged, and a wait flag if it was searched in the last 30 minutes. “searched” marks a segment covered with no alert.'],
   ['Import team track', 'Search log: a team’s GPX track from a GPS unit, collar or CalTopo. The corridor walked counts as searched over the track’s times, and ALERT waypoints are logged as alerts at their times.'],
   ['Time bar', 'An 8-hour forecast window in the area’s local time, starting when the person went missing (▲). Dragging it changes wind, sun, temperature and scent to that hour; it is a planning clock and does not follow the real clock. For searches running today, a green NOW marker shows the current time: click it to jump there.'],
   ['Read briefing', 'In the Plan tab after Deploy: reads every team’s start point, heading, wind, best hour and coverage aloud, ready to relay by radio. Spoken by Grok Voice when the server has an xAI key, otherwise by the browser’s voice.'],
-  ['Add alert', 'Click where a dog alerted, at the time on the time bar.'],
+  ['Add alert', 'Click where a dog alerted, at the time on the time bar. Each alert is listed in the search log: “move” then click the map to place it again (at the time bar’s time), or × to remove just that one.'],
   ['Searched', 'Mark an area a team covered without an alert: a circle (choose the radius) or a polygon (click corners, then Finish), over a 30 to 120 minute window ending at the time bar.'],
   ['On-site wind', 'Enter the wind a team measured (direction it comes from, speed). It replaces the forecast for that hour in the fallback model.'],
   ['Move focus', 'Live mode: drag the 3 km square elsewhere in the 12 km area, then Compute detail.'],

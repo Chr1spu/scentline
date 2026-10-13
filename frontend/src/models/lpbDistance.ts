@@ -10,7 +10,7 @@
  * Pure; no React/three.
  */
 
-import type { DistanceTable, ProfileParams, TerrainClass } from '../config/modelParams';
+import { PROFILES, type DistanceTable, type ProfileParams, type TerrainClass } from '../config/modelParams';
 
 /** Nearest available table when a terrain class has no data for a profile. */
 const FALLBACK: Record<TerrainClass, TerrainClass[]> = {
@@ -23,6 +23,13 @@ const FALLBACK: Record<TerrainClass, TerrainClass[]> = {
 
 /** The distance model for a profile in a terrain class, with the table actually used. */
 export function distanceModelFor(profile: ProfileParams, terrain: TerrainClass): { model: DistanceModel; used: TerrainClass | null; table: DistanceTable | null } {
+  if (profile.lpb?.mixOf) {
+    // blend the categories' distributions, weighted by their number of cases in this terrain
+    const parts = profile.lpb.mixOf.map((id) => distanceModelFor(PROFILES[id], terrain)).filter((p) => p.table);
+    const w = parts.map((p) => p.table!.n);
+    const n = w.reduce((a, b) => a + b, 0);
+    return { model: mixtureModel(parts.map((p) => p.model), w), used: terrain, table: { n, q: [0, 0, 0, 0] } };
+  }
   if (profile.lpb) {
     for (const t of FALLBACK[terrain]) {
       const tab = profile.lpb.distanceKm[t];
@@ -130,6 +137,27 @@ export function lognormalModel(medianM: number, spread: number): DistanceModel {
         else hi = mid;
       }
       return (lo + hi) / 2;
+    },
+  };
+}
+
+/** A weighted blend of distance distributions. */
+export function mixtureModel(models: DistanceModel[], weights: number[]): DistanceModel {
+  const total = weights.reduce((a, b) => a + b, 0) || 1;
+  const w = weights.map((v) => v / total);
+  const cdf = (d: number) => models.reduce((acc, m, i) => acc + w[i] * m.cdf(d), 0);
+  return {
+    cdf,
+    areaDensity: (d) => models.reduce((acc, m, i) => acc + w[i] * m.areaDensity(d), 0),
+    quantile: (p) => {
+      let lo = Math.log(1);
+      let hi = Math.log(1e6);
+      for (let it = 0; it < 60; it++) {
+        const mid = (lo + hi) / 2;
+        if (cdf(Math.exp(mid)) < p) lo = mid;
+        else hi = mid;
+      }
+      return Math.exp((lo + hi) / 2);
     },
   };
 }

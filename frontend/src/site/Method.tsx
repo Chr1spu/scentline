@@ -87,7 +87,7 @@ export function Method() {
             </thead>
             <tbody>
               {(Object.keys(PROFILES) as ProfileId[])
-                .filter((id) => PROFILES[id].lpb && !PROFILES[id].alias)
+                .filter((id) => PROFILES[id].lpb?.distanceKm.mtn && !PROFILES[id].alias)
                 .map((id) => {
                   const t = PROFILES[id].lpb!.distanceKm.mtn!;
                   return (
@@ -101,6 +101,11 @@ export function Method() {
                 })}
             </tbody>
           </table>
+          <p>
+            <strong>Adult, activity unknown</strong> has no table of its own: it blends the adult categories (
+            {PROFILES.adult.lpb!.mixOf!.map((id) => PROFILES[id].label.toLowerCase()).join(', ')}), each weighted by its number of cases, so it covers anyone over 12 when the
+            team does not yet know why they went missing.
+          </p>
           <p>Then:</p>
           <ul>
             <li>

@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react';
 import { HABITAT_CLASSES, MISSIONS } from '../config/missions';
-import { PROFILES } from '../config/modelParams';
+import { PROFILES, type ProfileId } from '../config/modelParams';
 import { shareBeyond } from '../models/probability';
 import { bestFocus, clearHides, computeDetailAt, finishPolygon, fmtTime, scoreTrialGpx, setHabitat, setProfile, setTerrainClass, setTravelDir } from '../state/controller';
 import { TERRAIN_LABELS, type TerrainClass } from '../config/modelParams';
@@ -35,7 +35,6 @@ export function SourceSection() {
   const tool = useStore((s) => s.tool);
   const draft = useStore((s) => s.searchDraft);
   const set = useStore((s) => s.set);
-  const mode = useStore((s) => s.mode);
   const travelDir = useStore((s) => s.travelDir);
   const ov = useStore((s) => s.bundle?.overview.meta);
   const areaKm = ov ? (Math.min(ov.cols, ov.rows) * ov.cellSize) / 1000 : 12;
@@ -44,19 +43,11 @@ export function SourceSection() {
   if (mission.source === 'lkp' || mission.source === 'water') {
     return (
       <>
-        {mission.profiles && (
-          <div className="grid grid-cols-2 gap-1">
-            {mission.profiles.map((id) => (
-              <button key={id} className={`btn btn-sm ${profile === id ? 'btn-on' : ''}`} onClick={() => setProfile(id)} title={PROFILES[id].note}>
-                {PROFILES[id].label}
-              </button>
-            ))}
-          </div>
-        )}
+        {mission.profiles && <WhoPicker ids={mission.profiles} />}
         {mission.source === 'lkp' && PROFILES[profile]?.lpb && <TerrainPicker />}
         {mission.source === 'lkp' && mission.id !== 'pet' && (
-          <label className="mt-1.5 flex items-center gap-1.5 text-[13px] text-ink-2" title="The direction they set off in, or the direction a trailing dog took from the last known point. ISRID: three in four lost people are found within 66° of it.">
-            Heading when last seen
+          <label className="mt-1.5 flex items-center justify-between gap-1.5 text-[13px] text-ink-2" title="The way they set off, or the way a trailing dog went from the last known point">
+            Heading
             <select
               className="field !w-auto !py-0.5"
               value={travelDir === null ? '' : String(travelDir)}
@@ -72,39 +63,33 @@ export function SourceSection() {
           </label>
         )}
         <div className="mt-1.5 flex gap-1">
-          <ToolButton tool="lkp" title={`Click the terrain to move: ${mission.lkpLabel.toLowerCase()}`}>
-            <Icon.Pin size={14} /> Move point
+          <ToolButton tool="lkp" title={`Click the map: ${mission.lkpLabel.toLowerCase()}`}>
+            <Icon.Pin size={14} /> Last seen
           </ToolButton>
           {mission.source === 'lkp' && (
             <>
-              <ToolButton tool="brushUp" title="Click to double the probability within 250 m">
+              <ToolButton tool="brushUp" title="Click the map: more likely here (you know something the map doesn't)">
                 <Icon.Brush size={14} /> Raise
               </ToolButton>
-              <ToolButton tool="brushDown" title="Click to halve the probability within 250 m">
+              <ToolButton tool="brushDown" title="Click the map: less likely here">
                 <Icon.Minus size={14} /> Lower
               </ToolButton>
             </>
           )}
         </div>
-        {mission.source === 'water' && <p className="mt-2 text-xs text-ink-2">Probability is on the water only, falling off with distance from where the person went in.</p>}
+        {mission.source === 'water' && <p className="mt-2 text-xs text-ink-2">Search the water near where they went in.</p>}
         {prob && mission.source === 'lkp' && (
-          <p className="mt-2 text-[13px] text-ink-2">
-            The 3 km focus square holds <span className="num font-semibold text-ink">{(prob.segmentFraction * 100).toFixed(0)}%</span> of the probability.
-          </p>
-        )}
-        {prob && mission.source === 'lkp' && prob.segmentFraction < 0.5 && (
-          <p className="mt-1.5 rounded-sm border-l-2 border-amber bg-amber/10 px-2 py-1 text-xs leading-snug text-ink-2">
-            Most of the probability is outside the focus square, where scent and team placements are not modelled. Plan the rest by probability, or move the square
-            {mode === 'live' ? ' (Focus square, below)' : ''}.
+          <p className="mt-2 text-[13px] text-ink-2" title="The detailed 3 km square is where teams are planned">
+            <span className="num font-semibold text-ink">{(prob.segmentFraction * 100).toFixed(0)}%</span> of the likely area is inside the planning square
+            {outside >= 0.05 ? (
+              <>
+                ; <span className="num">{Math.round(outside * 100)}%</span> is off the map
+              </>
+            ) : null}
+            .
           </p>
         )}
         {mission.source === 'lkp' && <FocusSuggestion />}
-        {outside >= 0.05 && mission.source === 'lkp' && (
-          <p className="mt-1.5 text-xs leading-snug text-ink-3">
-            About <span className="num">{Math.round(outside * 100)}%</span> of where a {PROFILES[profile].label.toLowerCase()} typically ends up lies beyond the{' '}
-            {Math.round(areaKm)} km modelled area and isn&apos;t on the map.
-          </p>
-        )}
       </>
     );
   }
@@ -121,7 +106,7 @@ export function SourceSection() {
           </button>
         </div>
         <p className="mt-2 text-xs text-ink-2">
-          {hides.length === 0 ? 'No hides yet.' : `${hides.length} hide${hides.length > 1 ? 's' : ''} placed (up to 3).`} Scrub the time bar to see where each scent cone goes.
+          {hides.length === 0 ? 'Place up to 3 hides.' : `${hides.length} hide${hides.length > 1 ? 's' : ''} placed.`} Drag the time bar to see where the scent goes.
         </p>
         <TrialImport enabled={hides.length > 0} />
       </>
@@ -258,12 +243,11 @@ function TrialImport({ enabled }: { enabled: boolean }) {
   };
   return (
     <div className="mt-2 border-t border-rule pt-2">
-      <p className="text-xs font-semibold text-ink">Score a training run</p>
-      <p className="mt-0.5 text-xs leading-snug text-ink-2">
-        Load the dog&apos;s GPS track (GPX) with a waypoint at each alert. Enter the measured wind first.
-      </p>
-      <label className={`btn btn-sm mt-1.5 w-full justify-center ${enabled ? '' : 'pointer-events-none opacity-50'}`}>
-        Import GPX
+      <label
+        className={`btn btn-sm w-full justify-center ${enabled ? '' : 'pointer-events-none opacity-50'}`}
+        title="The dog's GPS track (GPX) with a waypoint named ALERT at each alert. Enter the measured wind first."
+      >
+        Score a training run (GPX)
         <input type="file" accept=".gpx,application/gpx+xml" className="hidden" disabled={!enabled} onChange={(e) => onFile(e.target.files?.[0])} />
       </label>
       {trial && (
@@ -272,18 +256,16 @@ function TrialImport({ enabled }: { enabled: boolean }) {
             <span className="truncate">{trial.file}</span>
             <span className="num">to {fmtTime(trial.t)}</span>
           </div>
-          <div className="mt-1">
-            {trial.score.nAlerts} alert{trial.score.nAlerts === 1 ? '' : 's'}: model detection{' '}
-            <span className="num font-semibold text-ink">{trial.score.meanDetAlert.toFixed(2)}</span> at alerts vs{' '}
-            <span className="num">{trial.score.meanDetOther.toFixed(2)}</span> along the rest of the track.
-          </div>
-          {trial.score.auc !== null && (
-            <div className="mt-0.5">
-              AUC <span className="num font-semibold text-ink">{trial.score.auc.toFixed(2)}</span> (0.5 = chance, 1 = alerts always where the model expected).
+          {trial.score.auc !== null ? (
+            <div className="mt-1">
+              Match: <span className="num font-semibold text-ink">{trial.score.auc.toFixed(2)}</span>{' '}
+              <span className="text-ink-3">(1 = the dog alerted where Scentline expected scent, 0.5 = no better than chance)</span>
             </div>
+          ) : (
+            <div className="mt-1">{trial.score.nAlerts} alert{trial.score.nAlerts === 1 ? '' : 's'} scored.</div>
           )}
           <button className="mt-1 text-ink-3 underline hover:text-ink" onClick={saveRecord}>
-            Save trial record (JSON)
+            Save the run
           </button>
         </div>
       )}
@@ -302,9 +284,10 @@ function TerrainPicker() {
   const used = prob?.terrainUsed ?? null;
   const p = PROFILES[profile];
   const table = used && p.lpb ? distanceModelFor(p, used).table : null;
+  const tip = table && table.q[3] > 0 ? `Half are found within ${table.q[1]} km, 95% within ${table.q[3]} km (${table.n} past cases)` : 'How far people go depends on the terrain';
   return (
     <div className="mt-1.5 text-[13px] text-ink-2">
-      <label className="flex items-center gap-1.5" title="Lost Person Behavior tables differ by terrain (Bailey ecoregion domain, mountainous or not)">
+      <label className="flex items-center justify-between gap-1.5" title={tip}>
         Terrain
         <select className="field !w-auto !py-0.5" value={choice} onChange={(e) => setTerrainClass(e.target.value as TerrainClass | 'auto')}>
           <option value="auto">Auto{used && choice === 'auto' ? ` (${TERRAIN_LABELS[used].toLowerCase()})` : ''}</option>
@@ -315,13 +298,7 @@ function TerrainPicker() {
           ))}
         </select>
       </label>
-      {table && (
-        <p className="mt-1 text-xs leading-snug text-ink-3">
-          Found within <span className="num">{table.q[0]}</span>, <span className="num">{table.q[1]}</span>, <span className="num">{table.q[2]}</span> and{' '}
-          <span className="num">{table.q[3]}</span> km: 25%, 50%, 75%, 95% (Lost Person Behavior, {used ? TERRAIN_LABELS[used].toLowerCase() : ''}, {table.n} cases
-          {table.n < 20 ? '; few cases, treat with care' : ''}).
-        </p>
-      )}
+      {table && table.n < 20 && <p className="mt-1 text-xs text-ink-3">Based on only {table.n} past cases.</p>}
     </div>
   );
 }
@@ -339,17 +316,47 @@ function FocusSuggestion() {
   if (!best || best.share < prob.segmentFraction + 0.05) return null;
   const dist = Math.hypot(best.x, best.y);
   return (
-    <div className="mt-1.5 rounded-sm border border-rule bg-card px-2 py-1.5 text-xs leading-snug text-ink-2">
-      A 3 km square centred <span className="num">{(dist / 1000).toFixed(1)} km</span> from here would hold{' '}
-      <span className="num font-semibold text-ink">{Math.round(best.share * 100)}%</span> of the probability (this one holds{' '}
-      <span className="num">{Math.round(prob.segmentFraction * 100)}%</span>).
-      {mode === 'live' ? (
+    <div className="mt-1.5 rounded-sm border-l-2 border-amber bg-amber/10 px-2 py-1.5 text-xs leading-snug text-ink-2">
+      A square {(dist / 1000).toFixed(1)} km away would cover <span className="num font-semibold text-ink">{Math.round(best.share * 100)}%</span>.
+      {mode === 'live' && (
         <button className="btn btn-sm mt-1 w-full justify-center" disabled={busy} onClick={() => computeDetailAt(best.x, best.y)}>
-          Move the focus square there
+          Move the square there
         </button>
-      ) : (
-        ' Open the area live to move it.'
       )}
     </div>
+  );
+}
+
+/** "Who is missing?": one picker, grouped. */
+function WhoPicker({ ids }: { ids: ProfileId[] }) {
+  const profile = useStore((s) => s.profile);
+  const groups = new Map<string, ProfileId[]>();
+  for (const id of ids) {
+    const g = PROFILES[id].group ?? '';
+    groups.set(g, [...(groups.get(g) ?? []), id]);
+  }
+  return (
+    <label className="flex items-center justify-between gap-1.5 text-[13px] text-ink-2">
+      Who
+      <select className="field !w-auto max-w-[190px] !py-0.5" value={profile} onChange={(e) => setProfile(e.target.value as ProfileId)} title={PROFILES[profile]?.note}>
+        {[...groups.entries()].map(([g, list]) =>
+          g ? (
+            <optgroup key={g} label={g}>
+              {list.map((id) => (
+                <option key={id} value={id}>
+                  {PROFILES[id].label}
+                </option>
+              ))}
+            </optgroup>
+          ) : (
+            list.map((id) => (
+              <option key={id} value={id}>
+                {PROFILES[id].label}
+              </option>
+            ))
+          ),
+        )}
+      </select>
+    </label>
   );
 }

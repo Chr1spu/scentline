@@ -67,7 +67,7 @@ function useKeyboard() {
       if (e.key >= '1' && e.key <= '7') flyTo(Number(e.key));
       else if (e.key === 'd' || e.key === 'D') s.set({ debug: !s.debug });
       else if (e.key === 'm' || e.key === 'M') setView(s.view === 'map' ? 'scene' : 'map');
-      else if (e.key === 'Escape') s.set({ tool: 'none', hover: null, focusPreview: null, searchDraft: { ...s.searchDraft, pts: [] }, mobileSheet: 'none' });
+      else if (e.key === 'Escape') s.set({ tool: 'none', hover: null, movingAlert: null, focusPreview: null, searchDraft: { ...s.searchDraft, pts: [] }, mobileSheet: 'none' });
       else if (e.key === 'Enter' && s.tool === 'searched' && s.searchDraft.shape === 'polygon') finishPolygon();
       else if (e.key === ' ') {
         e.preventDefault();

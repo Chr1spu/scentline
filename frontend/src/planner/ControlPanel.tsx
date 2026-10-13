@@ -1,13 +1,13 @@
 import { useMemo, useState, type ReactNode } from 'react';
 import { Link } from '../router';
-import { computeDetailAt, deployTeams, fmtTime, importSearchTrack, releaseScent, resetSearch, scheduleHeat, setOnsiteWind, windConfidenceAt } from '../state/controller';
+import { computeDetailAt, deployTeams, fmtTime, importSearchTrack, importSegments, releaseScent, removeAlert, removeSearched, resetSearch, scheduleHeat, setOnsiteWind, startMoveAlert, useAutoSegments, windConfidenceAt } from '../state/controller';
 import { LAYER_LABELS, useStore, type LayerId, type Tool } from '../state/store';
 import { Icon } from '../ui/icons';
 import { SearchOptions } from './SearchOptions';
 import { SourceSection } from './SourceSection';
 import { MISSIONS, type SourceKind } from '../config/missions';
 
-const SOURCE_TITLE: Record<SourceKind, string> = { lkp: 'Subject', water: 'Where they went in', hides: 'Hides', area: 'Search area', habitat: 'Habitat' };
+const SOURCE_TITLE: Record<SourceKind, string> = { lkp: 'Who is missing', water: 'Where they went in', hides: 'Hides', area: 'Search area', habitat: 'Habitat' };
 
 function Section({ n, title, right, children }: { n?: number; title: string; right?: ReactNode; children: ReactNode }) {
   return (
@@ -31,7 +31,7 @@ function ToolButton({ tool, children, title }: { tool: Tool; children: ReactNode
       className={`btn btn-sm flex-1 ${active ? 'btn-on' : ''}`}
       title={title}
       aria-pressed={active}
-      onClick={() => useStore.getState().set({ tool: active ? 'none' : tool, hover: null, focusPreview: tool === 'focus' ? useStore.getState().focusPreview : null })}
+      onClick={() => useStore.getState().set({ tool: active ? 'none' : tool, hover: null, movingAlert: null, focusPreview: tool === 'focus' ? useStore.getState().focusPreview : null })}
     >
       {children}
     </button>
@@ -56,6 +56,7 @@ export function ControlPanel() {
   const focusPreview = useStore((s) => s.focusPreview);
   const alerts = useStore((s) => s.alerts);
   const searched = useStore((s) => s.searched);
+  const movingAlert = useStore((s) => s.movingAlert);
   const onsite = useStore((s) => s.onsiteWind);
   const busy = useStore((s) => s.busy);
   const time = useStore((s) => s.time);
@@ -125,34 +126,54 @@ export function ControlPanel() {
 
       <Section n={4} title="Search log" right={<button className="text-xs text-ink-3 underline hover:text-ink" onClick={resetSearch}>Reset</button>}>
         <div className="flex gap-1">
-          <ToolButton tool="alert" title="Click where a dog alerted, at the time on the time bar">
-            <Icon.Alert size={14} /> Add alert
+          <ToolButton tool="alert" title="Click where a dog alerted (at the time on the time bar)">
+            <Icon.Alert size={14} /> Alert
           </ToolButton>
-          <ToolButton tool="searched" title="Mark an area a team searched without an alert">
+          <ToolButton tool="searched" title="Mark an area searched with nothing found">
             <Icon.Ring size={14} /> Searched
           </ToolButton>
         </div>
-        {tool === 'alert' && <p className="mt-1.5 text-xs text-ink-2">Click where a dog alerted. In the demo, the pink markers are radio reports.</p>}
+        {tool === 'alert' && <p className="mt-1.5 text-xs text-ink-2">{movingAlert !== null ? 'Click the new spot.' : 'Click where the dog alerted.'}</p>}
         {tool === 'searched' && <SearchOptions />}
         <TrackImport />
         {(alerts.length > 0 || searched.length > 0) && (
           <ol className="mt-2 divide-y divide-rule rounded-sm border border-rule bg-card text-xs">
             {[
-              ...alerts.map((a, i) => ({ t: a.t, text: `Alert ${i + 1}: dog indicated`, tone: 'text-[#ff4fa3]' })),
-              ...searched.map((s) => ({ t: s.t1, text: `Searched ${fmtTime(s.t0)} to ${fmtTime(s.t1)}, no alert${s.recheck ? ', recheck' : ''}`, tone: s.recheck ? 'text-sar-dark' : 'text-ink-2' })),
+              ...alerts.map((a, i) => ({ key: `a${a.id}`, t: a.t, text: `Alert ${i + 1}`, tone: 'text-[#ff4fa3]', alertId: a.id, searchedId: null as number | null })),
+              ...searched.map((s) => ({
+                key: `s${s.id}`,
+                t: s.t1,
+                text: `Searched ${fmtTime(s.t0)}–${fmtTime(s.t1)}, nothing found${s.recheck ? ' (poor scent: recheck)' : ''}`,
+                tone: s.recheck ? 'text-sar-dark' : 'text-ink-2',
+                alertId: null as number | null,
+                searchedId: s.id,
+              })),
             ]
               .sort((a, b) => a.t - b.t)
-              .map((e, i) => (
-                <li key={i} className="flex gap-2 px-2 py-1">
+              .map((e) => (
+                <li key={e.key} className={`flex items-center gap-2 px-2 py-1 ${e.alertId !== null && movingAlert === e.alertId ? 'bg-amber/10' : ''}`}>
                   <span className="num text-ink-3">{fmtTime(e.t)}</span>
-                  <span className={e.tone}>{e.text}</span>
+                  <span className={`flex-1 ${e.tone}`}>{e.text}</span>
+                  {e.alertId !== null && (
+                    <button className="text-ink-3 underline hover:text-ink" title="Set the time bar to the right time, press Move, then click the right spot" onClick={() => startMoveAlert(e.alertId!)}>
+                      {movingAlert === e.alertId ? 'click map' : 'move'}
+                    </button>
+                  )}
+                  <button
+                    className="text-ink-3 hover:text-ink"
+                    aria-label="Remove"
+                    title="Remove"
+                    onClick={() => (e.alertId !== null ? removeAlert(e.alertId) : removeSearched(e.searchedId!))}
+                  >
+                    <Icon.Close size={11} />
+                  </button>
                 </li>
               ))}
           </ol>
         )}
       </Section>
 
-      <Section n={5} title="Wind measured on site" right={onsite && <span className="text-xs text-forest">in use for {onsite.hour}:00</span>}>
+      <Section n={5} title="Wind on site" right={onsite && <span className="text-xs text-forest">using {onsite.hour}:00 reading</span>}>
         <div className="flex items-center gap-1.5 text-[13px]">
           <span className="text-ink-2">From</span>
           <input aria-label="Wind from (degrees)" className="field !w-14 !py-0.5" value={wDir} onChange={(e) => setWDir(e.target.value)} />
@@ -172,16 +193,16 @@ export function ControlPanel() {
       </Section>
 
       {mode === 'live' && (
-        <Section title="Focus square">
+        <Section title="Planning square">
           <div className="flex gap-1">
-            <ToolButton tool="focus" title="Drag on the terrain to move the 3 km square">
+            <ToolButton tool="focus" title="Drag on the map to move the 3 km planning square">
               <Icon.Square size={14} /> Move
             </ToolButton>
             <button className="btn btn-primary btn-sm flex-1" disabled={!focusPreview} onClick={() => focusPreview && computeDetailAt(focusPreview[0], focusPreview[1])}>
-              Compute detail
+              Load it
             </button>
           </div>
-          {tool === 'focus' && <p className="mt-1.5 text-xs text-ink-2">Drag on the terrain to place the square (the camera stays still), then compute.</p>}
+          {tool === 'focus' && <p className="mt-1.5 text-xs text-ink-2">Drag the square on the map, then press Load it.</p>}
         </Section>
       )}
 
@@ -222,31 +243,36 @@ function WindConfidenceNote({ measured }: { measured: boolean }) {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const c = useMemo(() => (ready ? windConfidenceAt(time) : null), [ready, time, windVersion, lkp]);
   if (!c) return null;
-  if (measured) return <p className="mt-1.5 text-xs leading-snug text-ink-3">Measured wind in use. Re-measure if it shifts; plans follow it.</p>;
+  if (measured) return <p className="mt-1.5 text-xs leading-snug text-ink-3">Using your measured wind.</p>;
   return (
     <p className="mt-1.5 text-xs leading-snug text-ink-2">
-      Forecast direction: <span className={`font-semibold ${LEVEL_STYLE[c.level]}`}>{c.level === 'good' ? 'reliable' : c.level === 'fair' ? 'uncertain' : 'unreliable'}</span>
-      {c.reasons.length > 0 ? ` (${c.reasons.join('; ')})` : ' (steady wind, models agree)'}.
-      {c.level !== 'good' && ' Measure the wind at the start points before committing teams.'}
+      Forecast wind: <span className={`font-semibold ${LEVEL_STYLE[c.level]}`}>{c.level === 'good' ? 'reliable' : c.level === 'fair' ? 'uncertain' : 'unreliable'}</span>
+      {c.reasons.length > 0 ? ` (${c.reasons.join(', ')})` : ''}.{c.level !== 'good' && ' Measure it before sending teams.'}
     </p>
   );
 }
 
-/** Assign teams to whole search segments (how dog teams are tasked) or to start points with routes. */
+/** Assign teams to whole search segments, or (hasty) a start point and a route each. */
 function AssignMode() {
   const mode = useStore((s) => s.assignMode);
+  const source = useStore((s) => s.segments?.source ?? 'auto');
   const set = useStore((s) => s.set);
+  const tips = {
+    segments: 'Each team searches a whole segment; the handler chooses how',
+    points: 'First hour, before segments are set: a start point and a route into the wind for each team',
+  };
   return (
     <div className="mt-1.5">
       <div className="flex overflow-hidden rounded border border-rule text-xs">
         {(
           [
             ['segments', 'Segments'],
-            ['points', 'Start points'],
+            ['points', 'Hasty'],
           ] as const
         ).map(([m, label], i) => (
           <button
             key={m}
+            title={tips[m]}
             className={`flex-1 py-1 font-medium ${i ? 'border-l border-rule' : ''} ${mode === m ? 'bg-ink text-paper' : 'bg-paper text-ink-2'}`}
             onClick={() => set({ assignMode: m, deployments: [] })}
           >
@@ -254,11 +280,28 @@ function AssignMode() {
           </button>
         ))}
       </div>
-      <p className="mt-1 text-xs leading-snug text-ink-3">
-        {mode === 'segments'
-          ? 'Each team gets a whole segment, edges on trails, streams and ridges; the handler picks the pattern. Scentline says which segments, where to enter and when.'
-          : 'Each team gets a start point and a route upwind (for a hasty search).'}
-      </p>
+      {mode === 'segments' && (
+        <div className="mt-1 flex items-center justify-between gap-2 text-xs text-ink-3">
+          <label className="cursor-pointer underline hover:text-ink" title="Use the segments your team drew (CalTopo or Google Earth: KML or GeoJSON)">
+            {source === 'imported' ? 'Replace your segments' : 'Use your own segments'}
+            <input
+              type="file"
+              accept=".kml,.geojson,.json,application/vnd.google-earth.kml+xml,application/geo+json"
+              className="hidden"
+              onChange={async (e) => {
+                const f = e.target.files?.[0];
+                if (f) await importSegments(await f.text(), f.name);
+                e.target.value = '';
+              }}
+            />
+          </label>
+          {source === 'imported' && (
+            <button className="underline hover:text-ink" onClick={useAutoSegments}>
+              Use automatic
+            </button>
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -266,8 +309,8 @@ function AssignMode() {
 /** Debrief: a team's GPS track (and any alert waypoints) updates the map. */
 export function TrackImport() {
   return (
-    <label className="btn btn-sm mt-1.5 w-full justify-center" title="GPX from a GPS unit, collar or CalTopo: the corridor walked counts as searched over the track's times; ALERT waypoints are logged as alerts">
-      Import team track (GPX)
+    <label className="btn btn-sm mt-1.5 w-full justify-center" title="A team's GPS track (GPX): where they walked counts as searched; waypoints named ALERT become alerts">
+      Add a team's GPS track
       <input type="file" accept=".gpx,application/gpx+xml" className="hidden" onChange={async (e) => {
         const f = e.target.files?.[0];
         if (f) await importSearchTrack(await f.text(), f.name);

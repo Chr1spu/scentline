@@ -1,4 +1,4 @@
-import type { ProfileId } from '../config/modelParams';
+import type { TerrainClass, ProfileId } from '../config/modelParams';
 import type { GridLevel } from '../api/types';
 import type { Place, Weather } from '../models/env';
 import type { Feature2D } from '../models/probability';
@@ -31,6 +31,9 @@ export interface ProbResult {
   segmentFraction: number;
   /** local coords of the detail-grid probability peak */
   peak: [number, number];
+  /** Lost Person Behavior terrain table used, and its case count (null for non-LPB profiles) */
+  terrainUsed: TerrainClass | null;
+  distanceN: number | null;
 }
 
 export interface HeatResult {
@@ -113,7 +116,7 @@ export type Request =
   | { type: 'trial'; pts: [number, number][]; t: number }
   /** planning ensemble spread (±degrees), from the wind confidence */
   | { type: 'setSpread'; rotDeg: number }
-  | { type: 'probability'; profile: ProfileId; lkp: [number, number]; elapsedH?: number; travelDir?: number | null }
+  | { type: 'probability'; profile: ProfileId; lkp: [number, number]; elapsedH?: number; travelDir?: number | null; terrainClass?: TerrainClass | 'auto' }
   | { type: 'brush'; x: number; y: number; factor: number }
   | { type: 'heat'; t: number }
   | { type: 'deploy'; t: number; teams: number; hedge?: boolean; mode?: 'segments' | 'points' }

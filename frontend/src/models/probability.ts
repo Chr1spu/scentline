@@ -2,7 +2,8 @@
  * Probability map (CLAUDE.md §8.1): where the person might be, per overview cell, summing to 1.
  * distance prior (log-normal) × linear features × barriers × slope × (water = 0), plus brush edits.
  */
-import { DISPERSION, PROBABILITY, TERRAIN, type ProfileParams } from '../config/modelParams';
+import { DISPERSION, PROBABILITY, TERRAIN, type ProfileParams, type TerrainClass } from '../config/modelParams';
+import { distanceModelFor } from './lpbDistance';
 import { boxBlur, cellAt, cellCenterLocal, slopeDegrees, type GridMap, type GridMeta } from '../geo/grid';
 import { LC } from './terrainInfo';
 
@@ -198,11 +199,25 @@ export function terrainFactor(layers: StaticLayers, i: number, trackOffsetM: num
   return f;
 }
 
-/** Relative weight (mean 1 over 0–180°) of a find at angle `diff` (deg) off the direction of travel. */
-export function dispersionWeight(diffDeg: number): number {
-  const c = DISPERSION.cdf;
+/**
+ * Relative weight (mean 1 over 0–180°) of a find at angle `diff` (deg) off the direction of travel,
+ * from dispersion-angle quantiles (25/50/75/95%; default DISPERSION.cdf). The density is
+ * piecewise constant between the quantiles; a zero-width first interval is folded into the next.
+ */
+export function dispersionWeight(diffDeg: number, quantiles?: [number, number, number, number]): number {
+  const c: [number, number][] = quantiles
+    ? [
+        [0, 0],
+        [quantiles[0], 0.25],
+        [quantiles[1], 0.5],
+        [quantiles[2], 0.75],
+        [quantiles[3], 0.95],
+        [180, 1],
+      ]
+    : DISPERSION.cdf;
+  const pts = c.filter((p, i) => i === 0 || p[0] > c[i - 1][0]);
   const d = Math.min(180, Math.abs(diffDeg));
-  for (let k = 1; k < c.length; k++) if (d <= c[k][0]) return ((c[k][1] - c[k - 1][1]) / (c[k][0] - c[k - 1][0])) * 180;
+  for (let k = 1; k < pts.length; k++) if (d <= pts[k][0]) return ((pts[k][1] - pts[k - 1][1]) / (pts[k][0] - pts[k - 1][0])) * 180;
   return 1;
 }
 
@@ -338,6 +353,8 @@ export interface ProbabilityInput {
   elapsedH?: number;
   /** intended direction of travel (degrees from north), if known */
   travelDirDeg?: number | null;
+  /** Lost Person Behavior terrain table (default temperate mountains) */
+  terrainClass?: TerrainClass;
 }
 
 /** Furthest straight-line distance (m) the profile could plausibly have covered; Infinity = no limit. */
@@ -353,8 +370,8 @@ export function travelFactor(d: number, reachM: number): number {
 }
 
 /** Whether the time limit changes the map at all (reach inside the profile's 99th-percentile distance). */
-export function travelLimitBinds(profile: ProfileParams, elapsedH: number | undefined): boolean {
-  return travelReachM(profile, elapsedH) < profile.medianM * Math.exp(2.33 * profile.spread);
+export function travelLimitBinds(profile: ProfileParams, elapsedH: number | undefined, terrain: TerrainClass = 'mtn'): boolean {
+  return travelReachM(profile, elapsedH) < distanceModelFor(profile, terrain).model.quantile(0.99);
 }
 
 export function computeProbability(inp: ProbabilityInput): Float32Array {
@@ -362,13 +379,15 @@ export function computeProbability(inp: ProbabilityInput): Float32Array {
   const bias = inp.lowGroundBias ?? 0;
   const lcw = profile.landcoverWeight;
   const reach = travelReachM(profile, inp.elapsedH);
+  const dist = distanceModelFor(profile, inp.terrainClass ?? 'mtn').model;
+  const dispersion = profile.lpb?.dispersionDeg;
   const n = meta.cols * meta.rows;
   const p = new Float32Array(n);
   for (let i = 0; i < n; i++) {
     if (layers.water[i]) continue;
     const [x, y] = cellCenterLocal(map, i);
     const d = Math.max(Math.hypot(x - lkp[0], y - lkp[1]), meta.cellSize);
-    let w = logNormalPdf(d / 1000, profile.medianM / 1000, profile.spread) / (2 * Math.PI * d);
+    let w = dist.areaDensity(d);
     w *= travelFactor(d, reach);
     if (profile.terrain) w *= terrainFactor(layers, i, profile.terrain.trackOffsetM, meta.cellSize);
     else {
@@ -380,7 +399,7 @@ export function computeProbability(inp: ProbabilityInput): Float32Array {
       const bearing = (Math.atan2(x - lkp[0], y - lkp[1]) * 180) / Math.PI;
       const diff = ((bearing - inp.travelDirDeg + 540) % 360) - 180;
       const fade = Math.min(1, d / DISPERSION.fadeM);
-      w *= 1 + (dispersionWeight(diff) - 1) * fade;
+      w *= 1 + (dispersionWeight(diff, dispersion) - 1) * fade;
     }
     if (edits) w *= edits[i];
     if (lcw) w *= lcw[layers.landcover[i]] ?? 1;
@@ -477,19 +496,13 @@ export function sumInside(p: Float32Array, m: GridMap, bounds: { minX: number; m
   return s;
 }
 
-/** Standard normal CDF (Abramowitz-Stegun 7.1.26 erf, |error| < 1.5e-7). */
-function normCdf(z: number): number {
-  const t = 1 / (1 + (0.3275911 * Math.abs(z)) / Math.SQRT2);
-  const y = 1 - ((((1.061405429 * t - 1.453152027) * t + 1.421413741) * t - 0.284496736) * t + 0.254829592) * t * Math.exp(-(z * z) / 2);
-  return z >= 0 ? 0.5 * (1 + y) : 0.5 * (1 - y);
-}
 
 /**
  * Share of a profile's distance distribution that lies outside a square of the given half-width
  * centred on the last known point (approximated by the equal-area circle, radius 2h/√π). The map
  * is normalised inside the modelled area, so this much is silently left out; worth saying.
  */
-export function shareBeyond(profile: { medianM: number; spread: number }, halfWidthM: number): number {
+export function shareBeyond(profile: ProfileParams, halfWidthM: number, terrain: TerrainClass = 'mtn'): number {
   const r = (2 * halfWidthM) / Math.sqrt(Math.PI);
-  return 1 - normCdf(Math.log(r / profile.medianM) / profile.spread);
+  return 1 - distanceModelFor(profile, terrain).model.cdf(r);
 }

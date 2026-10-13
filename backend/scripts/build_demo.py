@@ -122,7 +122,7 @@ def main() -> None:
         "lkp": {"x": lx, "y": ly, "lat": area.lat, "lon": area.lon, "label": "Campsite (LKP)"},
         "truth": {"x": lx + args.truth_dx, "y": ly + args.truth_dy},
         "focus": {"x": dc[0], "y": dc[1], "size": area.detail["cols"] * area.detail["cellSize"]},
-        "profile": "child712", "teams": 3,
+        "profile": "child79", "teams": 3,
         "windSource": wind_source, "windMethod": wind_method, "windHours": hours,
         "windNinjaHours": wn_hours,
         "sources": sources, "warnings": warnings,

@@ -1,3 +1,4 @@
+import type { TerrainClass } from '../config/modelParams';
 import type { TrialScore } from '../models/validation';
 import { create } from 'zustand';
 import type { ProfileId } from '../config/modelParams';
@@ -109,6 +110,8 @@ export interface State {
   profile: ProfileId;
   /** intended direction of travel from the last known point (degrees from north), if known */
   travelDir: number | null;
+  /** Lost Person Behavior terrain table: auto (by relief) or chosen */
+  terrainClass: TerrainClass | 'auto';
   mission: MissionId;
   /** training hides (local metres) */
   hides: [number, number][];
@@ -174,8 +177,9 @@ export const useStore = create<State>((set, get) => ({
   activeWind: null,
   windVersion: 0,
   onsiteWind: null,
-  profile: 'child712',
+  profile: 'child79',
   travelDir: null,
+  terrainClass: 'auto',
   mission: 'wilderness',
   hides: [],
   trial: null,

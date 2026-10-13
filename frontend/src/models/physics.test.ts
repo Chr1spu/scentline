@@ -187,12 +187,12 @@ describe('probability prior reproduces its profile statistics', () => {
 
 describe('probability outside the modelled area', () => {
   it('is small for a young child and large for a hiker in a 12 km area', () => {
-    expect(shareBeyond(PROFILES.child16, 6000)).toBeLessThan(0.001);
+    expect(shareBeyond(PROFILES.child16, 6000)).toBeLessThan(0.01); // book tails: a few children do go far
     const hiker = shareBeyond(PROFILES.hiker, 6000);
     expect(hiker).toBeGreaterThan(0.2); // sourced spread (Australian study quartiles): a long tail
     expect(hiker).toBeLessThan(0.35);
     // half the distribution lies beyond the median by definition (equal-area radius = median)
-    expect(shareBeyond({ medianM: 1000, spread: 0.9 }, (1000 * Math.sqrt(Math.PI)) / 2)).toBeCloseTo(0.5, 5);
+    expect(shareBeyond({ ...PROFILES.dogSmall, medianM: 1000, spread: 0.9 }, (1000 * Math.sqrt(Math.PI)) / 2)).toBeCloseTo(0.5, 5);
   });
 });
 
@@ -211,7 +211,9 @@ describe('time-since-missing limit', () => {
   });
   it('binds early and lets go once anyone could have gone further than people are found', () => {
     expect(travelLimitBinds(PROFILES.child712, 0.5)).toBe(true);
-    expect(travelLimitBinds(PROFILES.child712, 6)).toBe(false);
+    // the book's tail (7–9 in mountains: 95% within 11.3 km) keeps the limit relevant for hours
+    expect(travelLimitBinds(PROFILES.child712, 6)).toBe(true);
+    expect(travelLimitBinds(PROFILES.child712, 24)).toBe(false);
     expect(travelLimitBinds(PROFILES.hiker, 3)).toBe(true);
   });
   it('pulls the map in early and leaves it alone later', () => {

@@ -79,7 +79,7 @@ export function NewSearch() {
     const m = new URLSearchParams(location.search).get('mission');
     return isMission(m) ? m : 'wilderness';
   });
-  const [profile, setProfile] = useState<ProfileId>('child712');
+  const [profile, setProfile] = useState<ProfileId>('child79');
   const ms = MISSIONS[mission];
   const chooseMission = (m: MissionId) => {
     setMissionId(m);
@@ -289,7 +289,7 @@ export function NewSearch() {
                     <input type="radio" name="profile" checked={profile === id} onChange={() => setProfile(id)} className="accent-sar" />
                     {PROFILES[id].label}
                   </span>
-                  <span className="num text-xs text-ink-3">median {(PROFILES[id].medianM / 1000).toFixed(1)} km</span>
+                  <span className="num text-xs text-ink-3">median {(PROFILES[id].medianM / 1000).toFixed(1)} km{PROFILES[id].lpb ? ' (mountains)' : ''}</span>
                 </label>
               ))}
             </div>

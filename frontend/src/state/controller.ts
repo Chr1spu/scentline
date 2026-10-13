@@ -6,7 +6,7 @@ import { backendHealthy, loadLive, loadOffline, type LiveRequest } from '../api/
 import { findSaved, loadSavedArea, saveArea } from '../api/savedAreas';
 import type { AreaBundle } from '../api/types';
 import { DEMO_ALERT_TIMES, VERT_EXAG } from '../config/constants';
-import { ENSEMBLE, HOTSPOTS, PROFILES, TIME, type ProfileId } from '../config/modelParams';
+import { ENSEMBLE, HOTSPOTS, PROFILES, TIME, type ProfileId, type TerrainClass } from '../config/modelParams';
 import type { SearchedSector as SectorShape } from '../models/searchUpdate';
 import { MISSIONS, type HabitatSpec, type MissionId } from '../config/missions';
 import { cellAt, toLocal, toWorld } from '../geo/grid';
@@ -154,6 +154,7 @@ async function applyBundle(b: AreaBundle) {
     onsiteWind: null,
     profile: c.profile,
     travelDir: null,
+    terrainClass: 'auto',
     teams: c.teams,
     lkp,
     time: (() => {
@@ -207,10 +208,10 @@ let probElapsed: number | undefined;
 let travelTimer: ReturnType<typeof setTimeout> | null = null;
 
 export async function recomputeProbability() {
-  const { profile, lkp, time, travelDir } = get();
+  const { profile, lkp, time, travelDir, terrainClass } = get();
   const elapsedH = elapsedAt(time);
   probElapsed = elapsedH;
-  const p = await sourceCall(() => worker().call<ProbResult>({ type: 'probability', profile, lkp, elapsedH, travelDir }));
+  const p = await sourceCall(() => worker().call<ProbResult>({ type: 'probability', profile, lkp, elapsedH, travelDir, terrainClass }));
   if (p) applyProb(p);
 }
 
@@ -221,7 +222,8 @@ function maybeRecomputeForTime() {
   const now = elapsedAt(time);
   const pp = PROFILES[profile];
   if (now === undefined || probElapsed === undefined || Math.abs(now - probElapsed) < 0.25) return;
-  if (!travelLimitBinds(pp, now) && !travelLimitBinds(pp, probElapsed)) return;
+  const terrain = get().prob?.terrainUsed ?? 'mtn';
+  if (!travelLimitBinds(pp, now, terrain) && !travelLimitBinds(pp, probElapsed, terrain)) return;
   if (travelTimer) clearTimeout(travelTimer);
   travelTimer = setTimeout(() => {
     travelTimer = null;
@@ -334,7 +336,13 @@ export async function setHabitat(habitat: HabitatSpec) {
 export async function setProfile(profile: ProfileId) {
   set({ profile, deployments: [] });
   await recomputeProbability();
-  get().toast(`Profile: ${PROFILES[profile].label} (median ${(PROFILES[profile].medianM / 1000).toFixed(1)} km)`);
+  get().toast(`Profile: ${PROFILES[profile].label}`);
+}
+
+/** Lost Person Behavior terrain table: 'auto' (mountains or flat by relief) or a chosen one. */
+export async function setTerrainClass(terrainClass: TerrainClass | 'auto') {
+  set({ terrainClass, deployments: [] });
+  await recomputeProbability();
 }
 
 /** Intended direction of travel (degrees from north) or null; reweights the map by ISRID dispersion. */

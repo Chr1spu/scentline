@@ -3,7 +3,8 @@
  * Heavy computation off the main thread: probability, ensembles, hotspots, deployment,
  * alert back-tracing and negative search updates. Holds the search state (prior, likelihood).
  */
-import { ENSEMBLE, HOTSPOTS, PROBABILITY, PROFILES, TRIANGULATION } from '../config/modelParams';
+import { AUTO_MOUNTAIN_RELIEF_M, ENSEMBLE, HOTSPOTS, PROBABILITY, PROFILES, TRIANGULATION, type TerrainClass } from '../config/modelParams';
+import { distanceModelFor } from '../models/lpbDistance';
 import { envAt } from '../models/env';
 import { MISSIONS, type MissionId } from '../config/missions';
 import { aggregateToOverview, areaPrior, habitatPrior, hidesPrior, waterPrior } from '../models/sources';
@@ -69,6 +70,8 @@ interface State {
   Lneg: Float32Array;
   /** intended direction of travel (degrees from north) or null */
   travelDir: number | null;
+  /** Lost Person Behavior terrain table: chosen, or 'auto' (by relief) */
+  terrainClass: TerrainClass | 'auto';
   warmed: boolean;
   mission: MissionId;
   source: SourceSpec;
@@ -131,6 +134,7 @@ function init(m: InitMsg) {
     seg: null,
     Lneg: new Float32Array(nD).fill(1),
     travelDir: null,
+    terrainClass: 'auto',
     prior: null,
     L: new Float32Array(nD).fill(1),
     outside: 1,
@@ -141,7 +145,7 @@ function init(m: InitMsg) {
     segmentFraction: 0,
     last: null,
     snapshots: null,
-    profile: 'child712',
+    profile: 'child79',
     lkp: [0, 0],
     warmed: false,
     mission: 'wilderness',
@@ -208,8 +212,23 @@ function recomputePrior() {
     edits: s.edits,
     elapsedH: s.elapsedH,
     travelDirDeg: s.travelDir,
+    terrainClass: resolvedTerrain(),
     lowGroundBias: mission.tuning.lowGroundBias,
   });
+}
+
+/** The terrain table in use: the chosen one, or mountains/flat by the 12 km area's relief. */
+function resolvedTerrain(): TerrainClass {
+  const s = st();
+  if (s.terrainClass !== 'auto') return s.terrainClass;
+  let lo = Infinity;
+  let hi = -Infinity;
+  for (const v of s.init.overview.elev) {
+    if (!Number.isFinite(v) || v < -1000) continue;
+    if (v < lo) lo = v;
+    if (v > hi) hi = v;
+  }
+  return hi - lo >= AUTO_MOUNTAIN_RELIEF_M ? 'mtn' : 'flat';
 }
 
 function recomputePosterior(): ProbResult {
@@ -238,7 +257,15 @@ function recomputePosterior(): ProbResult {
   s.probVersion++;
   s.last = null;
   s.snapshots = null;
-  return { overview: ovPost.slice(), detail: prob.slice(), segmentFraction: s.segmentFraction, peak: cellCenterLocal(s.ti.map, argmax(prob)) };
+  const dm = s.detailPrior ? null : distanceModelFor(PROFILES[s.profile], resolvedTerrain());
+  return {
+    overview: ovPost.slice(),
+    detail: prob.slice(),
+    segmentFraction: s.segmentFraction,
+    peak: cellCenterLocal(s.ti.map, argmax(prob)),
+    terrainUsed: dm?.used ?? null,
+    distanceN: dm?.table?.n ?? null,
+  };
 }
 
 /** Switch mission: scent tuning (here, helpers), where teams can stand, the source model. */
@@ -680,6 +707,7 @@ async function handle({ id, req }: Envelope): Promise<void> {
         s.lkp = req.lkp;
         s.elapsedH = req.elapsedH;
         s.travelDir = req.travelDir ?? null;
+        s.terrainClass = req.terrainClass ?? 'auto';
         recomputePrior();
         result = recomputePosterior();
         if (!s.warmed && pool && s.detailPost) {

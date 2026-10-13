@@ -1,4 +1,4 @@
-import { DETECTION, DISPERSION, ENSEMBLE, HOTSPOTS, NOSE, PROBABILITY, PROFILES, SCENT, SEARCH, SEGMENTS, TERRAIN, TRIANGULATION, TURBULENCE, WIND_CONFIDENCE, type ProfileId } from '../config/modelParams';
+import { AUTO_MOUNTAIN_RELIEF_M, DETECTION, DISPERSION, ENSEMBLE, HOTSPOTS, NOSE, PROBABILITY, PROFILES, SCENT, SEARCH, SEGMENTS, TERRAIN, TRIANGULATION, TURBULENCE, WIND_CONFIDENCE, type ProfileId } from '../config/modelParams';
 import { MISSIONS, visibleMissions, type SourceKind } from '../config/missions';
 import { noseWindFactor, LC } from '../models/terrainInfo';
 import { Link } from '../router';
@@ -70,31 +70,35 @@ export function Method() {
 
           <h2 id="probability">1. Where the person might be</h2>
           <p>
-            Each 30 m cell gets a weight from the straight-line distance <em>d</em> to the last known point, using a log-normal distribution fitted to published find distances: the
-            median, and a spread from the quartiles (ln(Q75/Q25) / 1.349). Sources: Twardy, Koester &amp; Gatt (2006), <em>Missing Person Behaviour: An Australian Study</em> (children, hikers),
-            and ISRID data for dementia (temperate flat terrain, 175 cases). The young-child median is the original estimate and has not been checked against a source. The density along
-            the radius is divided by 2π<em>d</em> so it becomes a per-cell value.
+            Each 30 m cell gets a weight from its straight-line distance <em>d</em> to the last known point, from the find distances in <em>Lost Person Behavior</em> (R. Koester,
+            2008; the ISRID database): the distances within which 25%, 50%, 75% and 95% of people in that category were found, by terrain. The planner picks the table for the area:
+            temperate mountains or flat/hilly by the area&apos;s relief (at least {AUTO_MOUNTAIN_RELIEF_M} m counts as mountains, a stand-in for the book&apos;s ecoregion map), or dry
+            or urban by hand. The curve goes through all four published distances. A single log-normal through the quartiles would badly understate the long tails (for children 1–3
+            in mountains it would put the 95% distance near 1.1 km; the book says 4.5 km).
           </p>
           <table>
             <thead>
               <tr>
-                <th>Profile</th>
-                <th>Median distance</th>
-                <th>Spread (σ of ln d)</th>
+                <th>Profile (mountains)</th>
+                <th>25% / 50% / 75% / 95%</th>
+                <th>Cases</th>
                 <th>Track offset</th>
-                <th>Note</th>
               </tr>
             </thead>
             <tbody>
-              {(Object.keys(PROFILES) as ProfileId[]).map((id) => (
-                <tr key={id}>
-                  <td>{PROFILES[id].label}</td>
-                  <td className="num">{(PROFILES[id].medianM / 1000).toFixed(1)} km</td>
-                  <td className="num">{PROFILES[id].spread}</td>
-                  <td className="num">{PROFILES[id].terrain ? `${PROFILES[id].terrain!.trackOffsetM} m` : `×(1 + ${PROFILES[id].featureA}·e^(−d/${PROFILES[id].featureL} m))`}</td>
-                  <td>{PROFILES[id].note}</td>
-                </tr>
-              ))}
+              {(Object.keys(PROFILES) as ProfileId[])
+                .filter((id) => PROFILES[id].lpb && !PROFILES[id].alias)
+                .map((id) => {
+                  const t = PROFILES[id].lpb!.distanceKm.mtn!;
+                  return (
+                    <tr key={id}>
+                      <td>{PROFILES[id].label}</td>
+                      <td className="num">{t.q.join(' / ')} km</td>
+                      <td className="num">{t.n}</td>
+                      <td className="num">{PROFILES[id].terrain ? `${PROFILES[id].terrain!.trackOffsetM} m` : ''}</td>
+                    </tr>
+                  );
+                })}
             </tbody>
           </table>
           <p>Then:</p>
@@ -111,13 +115,13 @@ export function Method() {
               data shows no fewer finds on steep ground.
             </li>
             <li>
-              <strong>Heading when last seen</strong> (optional). Three in four lost people are found within 66° of the direction they set off in (ISRID, children and people with
-              dementia): the weight is {DISPERSION.cdf[1][1] * 100}% within {DISPERSION.cdf[1][0]}°, {DISPERSION.cdf[2][1] * 100}% within {DISPERSION.cdf[2][0]}° and{' '}
-              {DISPERSION.cdf[3][1] * 100}% within {DISPERSION.cdf[3][0]}°, fading in over the first {DISPERSION.fadeM} m.
+              <strong>Heading when last seen</strong> (optional; or the direction a trailing dog took). Each category&apos;s dispersion angles from <em>Lost Person Behavior</em>{' '}
+              set how strongly the map leans that way: for a hiker, half are found within {PROFILES.hiker.lpb!.dispersionDeg![1]}° of the intended direction and three in four within{' '}
+              {PROFILES.hiker.lpb!.dispersionDeg![2]}°. It fades in over the first {DISPERSION.fadeM} m.
             </li>
             <li>
               <strong>Time since missing.</strong> The distances above describe where people are eventually found. Early on, nobody can be that far, so the weight falls off softly
-              beyond a generous top speed × the time since they went missing (child 1–6: {PROFILES.child16.maxSpeedKmh} km/h, child 7–12 and dementia: {PROFILES.child712.maxSpeedKmh} km/h,
+              beyond a generous top speed × the time since they went missing (child 1–3: {PROFILES.child13.maxSpeedKmh} km/h, 4–6: {PROFILES.child46.maxSpeedKmh} km/h, 7–12 and dementia: {PROFILES.child79.maxSpeedKmh} km/h,
               hiker: {PROFILES.hiker.maxSpeedKmh} km/h; at least {PROBABILITY.travelMinH * 60} minutes). Dragging the time bar early in an incident shows the area growing.
             </li>
             <li>

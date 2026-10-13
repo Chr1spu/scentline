@@ -3,13 +3,46 @@
  * validated scent physics; the UI labels them as such.
  */
 
-export type ProfileId = 'child16' | 'child712' | 'hiker' | 'dementia' | 'catIndoor' | 'catOutdoor' | 'dogSmall' | 'dogLarge';
+export type ProfileId =
+  | 'child13'
+  | 'child46'
+  | 'child79'
+  | 'child1012'
+  | 'hiker'
+  | 'dementia'
+  /** older names, kept so saved links keep working: 1–6 → 4–6, 7–12 → 7–9 */
+  | 'child16'
+  | 'child712'
+  | 'catIndoor'
+  | 'catOutdoor'
+  | 'dogSmall'
+  | 'dogLarge';
+
+/**
+ * Terrain tables in Lost Person Behavior (Koester 2008): Bailey ecoregion domain (temperate, dry)
+ * split into mountainous and non-mountainous ("flat", which includes hilly), plus urban.
+ */
+export type TerrainClass = 'mtn' | 'flat' | 'dryMtn' | 'dryFlat' | 'urban';
+
+export const TERRAIN_LABELS: Record<TerrainClass, string> = {
+  mtn: 'Temperate, mountains',
+  flat: 'Temperate, flat or hilly',
+  dryMtn: 'Dry, mountains',
+  dryFlat: 'Dry, flat or hilly',
+  urban: 'Urban',
+};
+
+/** Distance quantiles (km): 25%, 50%, 75% and 95% found within; n = cases. */
+export interface DistanceTable {
+  n: number;
+  q: [number, number, number, number];
+}
 
 export interface ProfileParams {
   label: string;
-  /** median crow's-flight distance from LKP (m) */
+  /** median crow's-flight distance from LKP (m), for display and log-normal profiles */
   medianM: number;
-  /** log-normal spread (sigma of ln d); from published quartiles, ln(Q75/Q25) / 1.349 */
+  /** log-normal spread (sigma of ln d), for profiles without `lpb` tables */
   spread: number;
   /** linear-feature attraction amplitude and length scale (m), for profiles without `terrain` */
   featureA: number;
@@ -20,6 +53,11 @@ export interface ProfileParams {
    * Profiles without it use the simple featureA/featureL attraction and the slope penalty.
    */
   terrain?: { trackOffsetM: number };
+  /**
+   * Lost Person Behavior tables: distance quantiles by terrain class (missing classes fall back to
+   * the nearest one) and the dispersion angle quantiles (degrees off the intended direction).
+   */
+  lpb?: { distanceKm: Partial<Record<TerrainClass, DistanceTable>>; dispersionDeg?: [number, number, number, number]; table: string };
   /** optional preference by land-cover class (1 water … 6 wetland); missing classes = 1 */
   landcoverWeight?: Partial<Record<number, number>>;
   /**
@@ -27,18 +65,45 @@ export interface ProfileParams {
    * Deliberately generous (only rules out distances nobody could cover); omitted = no limit.
    */
   maxSpeedKmh?: number;
+  /** hidden from profile pickers (old names kept for links) */
+  alias?: boolean;
   note: string;
 }
 
+// Lost Person Behavior (R. Koester, dbS Productions 2008), ISRID data. Distances in km (the book's
+// kilometre tables); dispersion angles in degrees; track offsets (50% from a linear feature):
+// hiker 100 m, dementia 15 m; not given for children (100 m used, the general ISRID figure).
+const LPB = {
+  child13: { distanceKm: { mtn: { n: 58, q: [0.2, 0.3, 0.6, 4.5] }, flat: { n: 61, q: [0.2, 0.3, 1.0, 3.2] }, dryMtn: { n: 13, q: [0.6, 1.3, 3.9, 9.0] }, dryFlat: { n: 13, q: [0.6, 1.3, 3.9, 9.0] }, urban: { n: 17, q: [0.2, 0.5, 0.8, 1.1] } }, dispersionDeg: [0, 23, 66, 137], table: 'Child (1–3), p. 130' },
+  child46: { distanceKm: { mtn: { n: 38, q: [0.2, 0.8, 1.5, 3.7] }, flat: { n: 90, q: [0.2, 0.6, 1.5, 6.6] }, dryMtn: { n: 19, q: [0.6, 1.9, 3.2, 8.2] }, dryFlat: { n: 19, q: [0.6, 1.9, 3.2, 8.2] }, urban: { n: 25, q: [0.1, 0.5, 1.0, 3.4] } }, dispersionDeg: [0, 23, 66, 137], table: 'Child (4–6), p. 135' },
+  child79: { distanceKm: { mtn: { n: 38, q: [0.8, 1.6, 3.2, 11.3] }, flat: { n: 79, q: [0.2, 0.8, 2.0, 8.0] }, dryMtn: { n: 18, q: [0.4, 1.2, 3.2, 7.2] }, urban: { n: 22, q: [0.2, 0.5, 1.5, 5.2] } }, dispersionDeg: [21, 40, 57, 146], table: 'Child (7–9), p. 140' },
+  child1012: { distanceKm: { mtn: { n: 72, q: [0.8, 1.6, 3.2, 9.0] }, flat: { n: 57, q: [0.4, 1.6, 4.8, 10.0] }, dryMtn: { n: 22, q: [0.8, 2.0, 7.2, 16.1] }, urban: { n: 18, q: [0.3, 1.5, 2.9, 5.8] } }, dispersionDeg: [21, 40, 57, 146], table: 'Child (10–12), p. 145' },
+  hiker: { distanceKm: { mtn: { n: 568, q: [1.1, 3.1, 5.8, 18.3] }, flat: { n: 274, q: [0.6, 1.8, 3.2, 9.9] }, dryMtn: { n: 221, q: [1.6, 3.2, 6.5, 19.3] }, dryFlat: { n: 58, q: [1.3, 2.1, 6.6, 13.1] } }, dispersionDeg: [2, 23, 64, 132], table: 'Hiker, p. 184' },
+  dementia: { distanceKm: { mtn: { n: 95, q: [0.3, 0.8, 1.9, 8.3] }, flat: { n: 175, q: [0.3, 1.0, 2.4, 12.8] }, dryMtn: { n: 14, q: [1.0, 1.9, 3.1, 6.1] }, dryFlat: { n: 15, q: [0.5, 1.6, 3.6, 11.8] }, urban: { n: 336, q: [0.3, 1.1, 3.2, 12.6] } }, dispersionDeg: [11, 23, 66, 70], table: 'Dementia, p. 164' },
+} satisfies Record<string, ProfileParams['lpb']>;
+
+const child = (label: string, lpb: ProfileParams['lpb'], speed: number, alias = false): ProfileParams => ({
+  label,
+  medianM: lpb!.distanceKm.mtn!.q[1] * 1000,
+  spread: 0.9,
+  featureA: 1,
+  featureL: 150,
+  maxSpeedKmh: speed,
+  terrain: { trackOffsetM: 100 },
+  lpb,
+  alias,
+  note: `Lost Person Behavior, ${lpb!.table}`,
+});
+
 export const PROFILES: Record<ProfileId, ProfileParams> = {
-  // Distances: Twardy, Koester & Gatt (2006), Missing Person Behaviour: An Australian Study, Table 2.8
-  // (km from LKP; child 0.6/1.1/2.0/5.0, n=34; hiker 1.5/3.2/8.1/17.4, n=72) and ISRID dementia,
-  // temperate flat, n=175: 0.2/0.6/1.5/7.9 mi (NEWSAR SAR FTM Unit 3, 2020). Track offsets: ISRID
-  // 50% distance from linear features (hiker 100 m, dementia 15 m; children not given, 100 m used).
-  child16: { label: 'Child (1–6)', medianM: 300, spread: 0.9, featureA: 1, featureL: 150, maxSpeedKmh: 1.5, terrain: { trackOffsetM: 100 }, note: 'median as in the original spec (attributed to Lost Person Behavior, mountains); not verified against a source here' },
-  child712: { label: 'Child (7–12)', medianM: 1100, spread: 0.89, featureA: 1, featureL: 150, maxSpeedKmh: 3, terrain: { trackOffsetM: 100 }, note: 'Australian study, all children (n=34)' },
-  hiker: { label: 'Hiker', medianM: 3200, spread: 1.25, featureA: 3, featureL: 150, maxSpeedKmh: 4, terrain: { trackOffsetM: 100 }, note: 'Australian study (n=72); LPB temperate mountains median 3.1 km agrees' },
-  dementia: { label: 'Person with dementia', medianM: 970, spread: 1.5, featureA: 1, featureL: 150, maxSpeedKmh: 3, terrain: { trackOffsetM: 15 }, note: 'ISRID temperate flat (n=175)' },
+  child13: child('Child (1–3)', LPB.child13, 1.5),
+  child46: child('Child (4–6)', LPB.child46, 2),
+  child79: child('Child (7–9)', LPB.child79, 3),
+  child1012: child('Child (10–12)', LPB.child1012, 3),
+  hiker: { label: 'Hiker', medianM: 3100, spread: 1.25, featureA: 3, featureL: 150, maxSpeedKmh: 4, terrain: { trackOffsetM: 100 }, lpb: LPB.hiker, note: 'Lost Person Behavior, Hiker, p. 184' },
+  dementia: { label: 'Person with dementia', medianM: 800, spread: 1.5, featureA: 1, featureL: 150, maxSpeedKmh: 3, terrain: { trackOffsetM: 15 }, lpb: LPB.dementia, note: 'Lost Person Behavior, Dementia, p. 164' },
+  child16: child('Child (4–6)', LPB.child46, 2, true),
+  child712: child('Child (7–9)', LPB.child79, 3, true),
   // lost pets: cats hide in cover close by (Huang et al. 2018: indoor-only cats median 39 m,
   // outdoor-access cats 315 m); dog figures are placeholders, dogs follow roads and trails
   catIndoor: { label: 'Cat (indoor-only)', medianM: 50, spread: 1.0, featureA: 0, featureL: 100, landcoverWeight: { 2: 0.5, 3: 1.6, 4: 1.3, 5: 1.4 }, note: 'Huang et al. 2018' },
@@ -46,6 +111,13 @@ export const PROFILES: Record<ProfileId, ProfileParams> = {
   dogSmall: { label: 'Dog (small)', medianM: 800, spread: 0.9, featureA: 2, featureL: 120, note: 'placeholder, tune' },
   dogLarge: { label: 'Dog (large)', medianM: 1600, spread: 0.9, featureA: 2.5, featureL: 150, note: 'placeholder, tune' },
 };
+
+/**
+ * Auto terrain class: Lost Person Behavior uses Bailey's ecoregion map (mountain provinces). Without
+ * that map here, an area counts as mountainous when the 12 km area spans at least this much relief
+ * (heuristic); dry and urban are chosen by hand.
+ */
+export const AUTO_MOUNTAIN_RELIEF_M = 300;
 
 export const PROBABILITY = {
   /** cells whose least-cost detour ratio exceeds these are "across a barrier" */

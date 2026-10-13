@@ -2,7 +2,9 @@ import type { ReactNode } from 'react';
 import { HABITAT_CLASSES, MISSIONS } from '../config/missions';
 import { PROFILES } from '../config/modelParams';
 import { shareBeyond } from '../models/probability';
-import { clearHides, finishPolygon, fmtTime, scoreTrialGpx, setHabitat, setProfile, setTravelDir } from '../state/controller';
+import { clearHides, finishPolygon, fmtTime, scoreTrialGpx, setHabitat, setProfile, setTerrainClass, setTravelDir } from '../state/controller';
+import { TERRAIN_LABELS, type TerrainClass } from '../config/modelParams';
+import { distanceModelFor } from '../models/lpbDistance';
 import { DETECTION } from '../config/modelParams';
 import { download } from './exportPlan';
 import { useStore, type Tool } from '../state/store';
@@ -37,7 +39,7 @@ export function SourceSection() {
   const travelDir = useStore((s) => s.travelDir);
   const ov = useStore((s) => s.bundle?.overview.meta);
   const areaKm = ov ? (Math.min(ov.cols, ov.rows) * ov.cellSize) / 1000 : 12;
-  const outside = ov && PROFILES[profile] ? shareBeyond(PROFILES[profile], (areaKm * 1000) / 2) : 0;
+  const outside = ov && PROFILES[profile] ? shareBeyond(PROFILES[profile], (areaKm * 1000) / 2, prob?.terrainUsed ?? 'mtn') : 0;
 
   if (mission.source === 'lkp' || mission.source === 'water') {
     return (
@@ -45,12 +47,13 @@ export function SourceSection() {
         {mission.profiles && (
           <div className="grid grid-cols-2 gap-1">
             {mission.profiles.map((id) => (
-              <button key={id} className={`btn btn-sm ${profile === id ? 'btn-on' : ''}`} onClick={() => setProfile(id)} title={`median distance ${PROFILES[id].medianM} m (${PROFILES[id].note})`}>
+              <button key={id} className={`btn btn-sm ${profile === id ? 'btn-on' : ''}`} onClick={() => setProfile(id)} title={PROFILES[id].note}>
                 {PROFILES[id].label}
               </button>
             ))}
           </div>
         )}
+        {mission.source === 'lkp' && PROFILES[profile]?.lpb && <TerrainPicker />}
         {mission.source === 'lkp' && mission.id !== 'pet' && (
           <label className="mt-1.5 flex items-center gap-1.5 text-[13px] text-ink-2" title="The direction they set off in, or the direction a trailing dog took from the last known point. ISRID: three in four lost people are found within 66° of it.">
             Heading when last seen
@@ -282,6 +285,41 @@ function TrialImport({ enabled }: { enabled: boolean }) {
             Save trial record (JSON)
           </button>
         </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Which Lost Person Behavior table to use: auto picks temperate mountains or flat by the area's
+ * relief; dry and urban are chosen by hand. Shows the table's distances and case count.
+ */
+function TerrainPicker() {
+  const choice = useStore((s) => s.terrainClass);
+  const profile = useStore((s) => s.profile);
+  const prob = useStore((s) => s.prob);
+  const used = prob?.terrainUsed ?? null;
+  const p = PROFILES[profile];
+  const table = used && p.lpb ? distanceModelFor(p, used).table : null;
+  return (
+    <div className="mt-1.5 text-[13px] text-ink-2">
+      <label className="flex items-center gap-1.5" title="Lost Person Behavior tables differ by terrain (Bailey ecoregion domain, mountainous or not)">
+        Terrain
+        <select className="field !w-auto !py-0.5" value={choice} onChange={(e) => setTerrainClass(e.target.value as TerrainClass | 'auto')}>
+          <option value="auto">Auto{used && choice === 'auto' ? ` (${TERRAIN_LABELS[used].toLowerCase()})` : ''}</option>
+          {(Object.keys(TERRAIN_LABELS) as TerrainClass[]).map((t) => (
+            <option key={t} value={t}>
+              {TERRAIN_LABELS[t]}
+            </option>
+          ))}
+        </select>
+      </label>
+      {table && (
+        <p className="mt-1 text-xs leading-snug text-ink-3">
+          Found within <span className="num">{table.q[0]}</span>, <span className="num">{table.q[1]}</span>, <span className="num">{table.q[2]}</span> and{' '}
+          <span className="num">{table.q[3]}</span> km: 25%, 50%, 75%, 95% (Lost Person Behavior, {used ? TERRAIN_LABELS[used].toLowerCase() : ''}, {table.n} cases
+          {table.n < 20 ? '; few cases, treat with care' : ''}).
+        </p>
       )}
     </div>
   );
